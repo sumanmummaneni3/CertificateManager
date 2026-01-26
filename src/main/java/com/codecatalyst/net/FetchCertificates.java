@@ -1,5 +1,8 @@
 package com.codecatalyst.net;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import javax.net.ssl.*;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -16,6 +19,7 @@ import java.security.cert.X509Certificate;
  */
 public class FetchCertificates {
 
+   private static final Logger logger = LogManager.getLogger(FetchCertificates.class);
    private static final TrustManager[] trustAllCerts = new TrustManager[]{
             new X509TrustManager() {
                 public X509Certificate[] getAcceptedIssuers() { return null; }
@@ -32,7 +36,7 @@ public class FetchCertificates {
     }
 
 
-    public X509Certificate fetchCertMetadata() throws CertificateException, IOException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
+    public X509Certificate fetchCertMetadata() throws CertificateException{
         try {
             SSLContext sc = SSLContext.getInstance("TLS");
             sc.init(null, trustAllCerts, new java.security.SecureRandom());
@@ -45,7 +49,7 @@ public class FetchCertificates {
             return (serverCerts.length > 0) ? (X509Certificate) serverCerts[0] : null;
         } catch (KeyManagementException | IOException | NoSuchAlgorithmException e) {
             System.err.println("Error while fetching certificates: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Error while fetching certificates: ",e);
             throw new CertificateException("Error while fetching certificates: " + e.getMessage());
         }
     }

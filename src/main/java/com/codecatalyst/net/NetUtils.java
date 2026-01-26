@@ -5,7 +5,7 @@ public class NetUtils {
         String[] parts = ip.split("\\.");
         long result = 0;
         for (int i = 0; i < parts.length; i++) {
-            result += Integer.parseInt(parts[i]) * Math.pow(256, 3 - i);
+            result += (long) (Integer.parseInt(parts[i]) * Math.pow(256, 3 - i));
         }
         return result;
     }

@@ -1,5 +1,8 @@
 package com.codecatalyst;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import com.codecatalyst.net.FetchCertificates;
 import com.codecatalyst.persist.PersistenceManager;
 
@@ -20,11 +23,12 @@ import static com.codecatalyst.net.NetUtils.longToIp;
 // click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 public class Main {
 
-
+    private static final Logger logger = LogManager.getLogger(Main.class);
 
     public static void main(String[] args) {
         if (args.length == 0) {
             System.err.println(getHelpMessage());
+            logger.error(getHelpMessage());
             return;
         }
         String command = args[0];
@@ -37,19 +41,26 @@ public class Main {
                 case "-scan":
                     handleScanCommand(args);
                     break;
+                case "-rm":
+                    removeCertificate(args);
+                    break;
+                case "-update":
+                    updateCertificate(args);
+                    break;
                 case "-help":
                 case "--help":
                     System.out.println(getHelpMessage());
                     break;
                 default:
-                    System.err.println("Unknow command "+ command+"\n");
-                    System.err.println(getHelpMessage());
+                    String error = "Unknow command "+ command+"\n"+getHelpMessage();
+                    logger.error(error);
+                    System.err.println(error);
             }
         } catch (Exception e) {
-            System.err.println("Critical Error: "+e.getMessage());
-            e.printStackTrace();
+            logger.error("Critical Error: ",e);
         }
     }
+
     private static void printAllCertificates() throws Exception {
         Map<String, X509Certificate> certs = PersistenceManager.getInstance().getAllCertificates();
 
@@ -88,7 +99,7 @@ public class Main {
     private static void handleScanCommand(String[] args) throws Exception {
         if (args.length > 1 && args[1].equals("--range")) {
             // Range Scan
-            String startIp = (args.length == 5) ? args[2] : args[2];
+            String startIp = args[2];
             String endIp   = (args.length == 5) ? args[4] : args[3];
 
             long start = ipToLong(startIp);
@@ -115,11 +126,14 @@ public class Main {
                 // DELEGATION: The main class just hands the data to the repository
                 PersistenceManager.getInstance().saveCertificate(host, cert);
                 System.out.println("Saved.");
+                logger.info("Certificate info: " + cert.getIssuerX500Principal().getName());
             } else {
                 System.out.println("No SSL.");
+                logger.info("SSL Certificate is null !!!");
             }
         } catch (Exception e) {
-            System.out.println("✘ Error: " + e.getMessage());
+            logger.error("Critical Error: ",e);
+            System.out.println("Error: " + e.getMessage());
         }
     }
 
@@ -127,7 +141,6 @@ public class Main {
     private static boolean isValidIp(String ip) {
         return ip != null && ip.matches("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}");
     }
-
 
     private static String getHelpMessage(){
         return """
@@ -138,5 +151,20 @@ public class Main {
                   2. Scan Single:     java CertManager -scan <domain_or_ip>
                   3. Scan Range:      java CertManager -scan --range <start_ip> - <end_ip>
                 """;
+    }
+
+    private static void removeCertificate(String [] args) throws Exception {
+        logger.info("Removing certificate from database...");
+        String alias  = args[1];
+        logger.info("Removing certificate from database with alias: " + alias);
+        PersistenceManager.getInstance().removeCertificate(alias);
+    }
+
+    private static void updateCertificate(String [] args) throws Exception {
+        if(args.length > 2 && "--host".equals(args[1])){
+            String host  = args[2];
+            logger.info("Updating certificate from database...");
+            scanAndStore(host);
+        }
     }
 }

@@ -2,6 +2,9 @@ package com.codecatalyst.persist;
 
 import java.io.*;
 import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -61,6 +64,24 @@ public class PersistenceManager {
         return certMap;
     }
 
+    /**
+     * Removes the certificate from the keystore that matches the given alias.
+     * @param alias used to store the certificate.
+     * @return true if found in key store else false.
+     * @throws Exception if any error during removal of the given alias.
+     */
+    public boolean removeCertificate(String alias) throws Exception {
+        KeyStore ks = loadKeyStore();
+        if(ks.containsAlias(alias)){
+            ks.deleteEntry(alias);
+            saveStore(ks);
+            return true;
+        } else {
+            return false;
+        }
+
+    }
+
     // --- Private Helper to Load File ---
     private KeyStore loadKeyStore() throws Exception {
         KeyStore ks = KeyStore.getInstance(KEYSTORE_TYPE);
@@ -74,6 +95,12 @@ public class PersistenceManager {
             ks.load(null, password);
         }
         return ks;
+    }
+
+    private void saveStore(KeyStore ks) throws CertificateException, KeyStoreException, IOException, NoSuchAlgorithmException {
+        try(FileOutputStream fos = new FileOutputStream(keystoreFile)){
+            ks.store(fos, password);
+        }
     }
 
 

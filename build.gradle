@@ -1,5 +1,7 @@
 plugins {
     id("java")
+    id 'org.springframework.boot' version '3.2.2' // Latest stable
+    id 'io.spring.dependency-management' version '1.1.4'
 }
 
 group = "com.codecatalyst"
@@ -10,6 +12,10 @@ repositories {
 }
 
 dependencies {
+    // Spring Boot Web (includes Tomcat)
+    implementation ('org.springframework.boot:spring-boot-starter-web') {
+        exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
+    }
     implementation("org.apache.logging.log4j:log4j-api:2.23.1")
     runtimeOnly("org.apache.logging.log4j:log4j-core:2.23.1")
     testImplementation(platform("org.junit:junit-bom:5.10.0"))

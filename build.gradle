@@ -1,7 +1,7 @@
 plugins {
     id("java")
     id 'org.springframework.boot' version '3.2.2' // Latest stable
-    id 'io.spring.dependency-management' version '1.1.4'
+    id 'io.spring.dependency-management' version '1.1.5'
 }
 
 group = "com.codecatalyst"
@@ -10,17 +10,32 @@ version = "1.0-SNAPSHOT"
 repositories {
     mavenCentral()
 }
+// 1. Define the CLI condition
+def isCli = project.hasProperty('cli')
 
-dependencies {
-    // Spring Boot Web (includes Tomcat)
-    implementation ('org.springframework.boot:spring-boot-starter-web') {
-        exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
+ dependencies {
+    // 2. Conditionally add Spring Boot dependencies
+    if (!isCli) {
+        implementation ('org.springframework.boot:spring-boot-starter-web') {
+            exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
+        }
     }
-    implementation("org.apache.logging.log4j:log4j-api:2.23.1")
-    runtimeOnly("org.apache.logging.log4j:log4j-core:2.23.1")
+    implementation("org.apache.logging.log4j:log4j-api:2.25.3")
+    runtimeOnly('org.apache.logging.log4j:log4j-core:2.25.3')
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+sourceSets {
+    main {
+        java {
+            // 3. Exclude Spring-specific source files when building CLI
+            // You MUST update the path below to match where your Spring Boot Main class/Controllers live
+            if (isCli) {
+                exclude 'com/codecatalyst/service/**'
+            }
+        }
+    }
 }
 
 tasks.test {

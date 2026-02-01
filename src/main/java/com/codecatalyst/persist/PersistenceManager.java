@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2026 CodeCatalyst
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.codecatalyst.persist;
 
 import java.io.*;
@@ -66,20 +82,16 @@ public class PersistenceManager {
 
     /**
      * Removes the certificate from the keystore that matches the given alias.
+     *
      * @param alias used to store the certificate.
-     * @return true if found in key store else false.
      * @throws Exception if any error during removal of the given alias.
      */
-    public boolean removeCertificate(String alias) throws Exception {
+    public void removeCertificate(String alias) throws Exception {
         KeyStore ks = loadKeyStore();
         if(ks.containsAlias(alias)){
             ks.deleteEntry(alias);
             saveStore(ks);
-            return true;
-        } else {
-            return false;
         }
-
     }
 
     // --- Private Helper to Load File ---

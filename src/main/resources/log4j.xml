@@ -5,15 +5,15 @@
             <PatternLayout pattern="%msg%n"/>
         </Console>
 
-        <File name="FileLogger" fileName="app.log">
+        <File name="FileLogger" fileName="${sys:user.home}/.certmanager/logs/certmgr.log">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss} [%t] %-5level %logger{36} - %msg%n"/>
         </File>
     </Appenders>
 
     <Loggers>
-        <Root level="debug">
-            <AppenderRef ref="Console" level="info"/>
-            <AppenderRef ref="FileLogger" level="debug"/>
+        <Root level="info">
+            <AppenderRef ref="Console" level="error"/>
+            <AppenderRef ref="FileLogger" level="info"/>
         </Root>
     </Loggers>
 </Configuration>

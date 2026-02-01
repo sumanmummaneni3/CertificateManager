@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2026 CodeCatalyst
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.codecatalyst;
 
 import org.apache.logging.log4j.LogManager;
@@ -30,6 +46,7 @@ public class CertManager {
     private static final BigInteger MAX_RANGE_SIZE = BigInteger.valueOf(10000);
 
     public static void main(String[] args) {
+        System.out.println("app.log.dir = " + System.getProperty("app.log.dir"));
         if (args.length == 0) {
             System.err.println(getHelpMessage());
             logger.error(getHelpMessage());
@@ -39,23 +56,22 @@ public class CertManager {
         try {
             System.out.println("Command: " + command.substring(1));
             switch (command) {
-                case "--list":
+                case "-list":
                     printAllCertificates();
                     break;
-                case "--scan":
+                case "-scan":
                     handleScanCommand(args);
                     break;
-                case "--rm":
+                case "-rm":
                     removeCertificate(args);
                     break;
-                case "--update":
+                case "-update":
                     updateCertificate(args);
                     break;
                 case "-help":
-                case "--help":
                     System.out.println(getHelpMessage());
                     break;
-                case "--version":
+                case "-version":
                     System.out.println("version: 1.0.0");
                     System.out.println("Date: 20260201");
                     break;

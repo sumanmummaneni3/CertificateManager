@@ -1,43 +1,99 @@
 plugins {
-    id("java")
-    id 'org.springframework.boot' version '3.2.2' // Latest stable
-    id 'io.spring.dependency-management' version '1.1.5'
+    id 'java'
+    id 'application'
 }
 
 group = "com.codecatalyst"
-version = "1.0-SNAPSHOT"
+version = "1.0.0-20260201"
 
 repositories {
     mavenCentral()
 }
-// 1. Define the CLI condition
-def isCli = project.hasProperty('cli')
 
- dependencies {
-    // 2. Conditionally add Spring Boot dependencies
-    if (!isCli) {
-        implementation ('org.springframework.boot:spring-boot-starter-web') {
-            exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
-        }
-    }
-    implementation("org.apache.logging.log4j:log4j-api:2.25.3")
-    runtimeOnly('org.apache.logging.log4j:log4j-core:2.25.3')
-    testImplementation(platform("org.junit:junit-bom:5.10.0"))
-    testImplementation("org.junit.jupiter:junit-jupiter")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-}
-sourceSets {
-    main {
-        java {
-            // 3. Exclude Spring-specific source files when building CLI
-            // You MUST update the path below to match where your Spring Boot Main class/Controllers live
-            if (isCli) {
-                exclude 'com/codecatalyst/service/**'
-            }
-        }
-    }
+// 1. Application configuration (No Spring Boot)
+application {
+    mainClass = 'com.codecatalyst.CertManager' // [cite: 4]
 }
 
-tasks.test {
-    useJUnitPlatform()
+// 2. Dependencies
+dependencies {
+    implementation 'org.apache.logging.log4j:log4j-api:2.25.3' // [cite: 2]
+    runtimeOnly 'org.apache.logging.log4j:log4j-core:2.25.3' // [cite: 2]
+
+    testImplementation platform('org.junit:junit-bom:5.10.0') // [cite: 2]
+    testImplementation 'org.junit.jupiter:junit-jupiter' // [cite: 2]
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher' // [cite: 2]
+}
+
+// 3. Helper for Cross-Platform Detection
+def getOperatingSystem() {
+    String os = System.getProperty("os.name").toLowerCase()
+    if (os.contains("win")) return "windows"
+    if (os.contains("mac")) return "mac"
+    return "linux"
+}
+
+// 4. Configure the JAR manifest
+tasks.named('jar') {
+    manifest {
+        attributes(
+                'Main-Class': 'com.codecatalyst.CertManager', // [cite: 5]
+                'Implementation-Title': 'CertManager CLI', // [cite: 5]
+                'Implementation-Version': project.version // [cite: 5]
+        )
+    }
+}
+
+// 5. Setup jpackage input directory
+// Define this ONLY ONCE to avoid the "already contains variable" error
+def jpackageInputDir = layout.buildDirectory.dir("jpackage-input")
+
+tasks.register('prepareJPackageInput', Copy) {
+    from configurations.runtimeClasspath //
+    from tasks.named('jar') //
+    into jpackageInputDir //
+}
+
+// 6. Cross-Platform jpackage Task
+tasks.register('createInstaller', Exec) {
+    group = "distribution"
+    description = "Builds a native installer based on the current OS"
+
+    dependsOn 'prepareJPackageInput' // [cite: 7]
+
+    def osType = getOperatingSystem()
+    def outputDir = layout.buildDirectory.dir("installer") // [cite: 7]
+    def jarFile = "cert-manager-cli-${project.version}.jar" // [cite: 7]
+
+    def jargs = [
+            'jpackage',
+            '--input', jpackageInputDir.get().asFile.absolutePath, // [cite: 8]
+            '--name', 'CertManager', // [cite: 8]
+            '--main-jar', jarFile, // [cite: 9]
+            '--main-class', 'com.codecatalyst.CertManager', // [cite: 9]
+            '--dest', outputDir.get().asFile.absolutePath, // [cite: 9]
+            '--app-version', '1.0.0', // [cite: 12]
+            '--java-options', '-Dlog4j2.configurationFile=log4j2.xml' // [cite: 12]
+    ]
+
+    // OS-Specific flags
+    if (osType == "windows") {
+        jargs << '--type' << 'msi' // [cite: 10]
+        jargs << '--win-console' // [cite: 11]
+    } else if (osType == "mac") {
+        jargs << '--type' << 'dmg' // [cite: 10]
+    } else {
+        jargs << '--type' << 'deb' // [cite: 10]
+    }
+
+    commandLine jargs
+}
+
+// Link build to the installer creation
+tasks.named('build') {
+    dependsOn 'createInstaller'
+}
+
+tasks.named('test') {
+    useJUnitPlatform() // [cite: 13]
 }

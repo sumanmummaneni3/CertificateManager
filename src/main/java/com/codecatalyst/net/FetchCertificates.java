@@ -30,7 +30,9 @@ import java.security.cert.X509Certificate;
 
 
 /**
- *
+ * This class fetches the certificate from the provided host and port.
+ * If port is not provided it will use 443 as the default port.
+ * It return the
  */
 public class FetchCertificates {
 
@@ -44,10 +46,18 @@ public class FetchCertificates {
     };
 
    private final String host;
+   private int port = -1;
 
 
     public FetchCertificates(String host){
         this.host = host;
+        //Default is 443 port only.
+        port = 443;
+    }
+
+    public FetchCertificates(String host, int port){
+        this.host = host;
+        this.port = port;
     }
 
 
@@ -57,15 +67,14 @@ public class FetchCertificates {
             sc.init(null, trustAllCerts, new java.security.SecureRandom());
             SSLSocketFactory factory = sc.getSocketFactory();
             Socket socket = new Socket();
-            socket.connect(new InetSocketAddress(host, 443), 1500); // Fast 1.5s timeout
-            SSLSocket sslSocket = (SSLSocket) factory.createSocket(socket, host, 443, true);
+            socket.connect(new InetSocketAddress(host, port), 1500); // Fast 1.5s timeout
+            SSLSocket sslSocket = (SSLSocket) factory.createSocket(socket, host, port, true);
             sslSocket.startHandshake();
             java.security.cert.Certificate[] serverCerts = sslSocket.getSession().getPeerCertificates();
             return (serverCerts.length > 0) ? (X509Certificate) serverCerts[0] : null;
         } catch (KeyManagementException | IOException | NoSuchAlgorithmException e) {
-            //System.err.println("Error while fetching certificates: " + e.getMessage());
-            logger.error("Error while fetching certificates: ",e);
-            throw new CertificateException("Error while fetching certificates: " + e.getMessage());
+            System.err.println("Error while fetching certificates: " + e.getMessage());
+            throw new CertificateException("Error while fetching certificates: " + e.getMessage(), e);
         }
     }
 

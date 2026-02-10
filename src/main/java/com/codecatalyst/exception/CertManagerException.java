@@ -13,16 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.codecatalyst;
+package com.codecatalyst.exception;
 
-import java.text.SimpleDateFormat;
+/**
+ * A custom exception class that can be used for wrapping.
+ */
+public class CertManagerException extends Exception{
 
-public class CertConstants {
-    // Standard PKCS12 format (modern default for Java)
-    public static final String KEYSTORE_FILE = "keystore.p12";
-    public static final String KEYSTORE_TYPE = "PKCS12";
-    public static final char[] PASSWORD = "changeit".toCharArray();
-    public static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("yyyy-MM-dd");
-    public static final String LEAF = "-leaf";
-    public static final String CHAIN_CERT = "-inter-";
+    public CertManagerException(String message) {
+        super(message);
+    }
+    public CertManagerException(String message, Throwable cause) {
+        super(message, cause);
+    }
+    public CertManagerException(Throwable cause) {
+        super(cause);
+    }
 }

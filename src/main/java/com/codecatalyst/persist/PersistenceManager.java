@@ -52,29 +52,76 @@ public class PersistenceManager {
      * @param alias The unique identifier (e.g., hostname or IP)
      * @param cert The certificate object to store
      */
-    public void saveCertificate(String alias, X509Certificate cert) throws Exception {
+    public void saveCertificate(String alias, X509Certificate cert) throws CertificateException {
+
         KeyStore ks = loadKeyStore();
 
-        // This implicitly updates the cert if the alias already exists
-        ks.setCertificateEntry(alias, cert);
+        try {
+            // This implicitly updates the cert if the alias already exists
+            ks.setCertificateEntry(alias, cert);
+        } catch (KeyStoreException e) {
+            System.err.println("Error loading keystore: " + e.getMessage());
+            throw new CertificateException(e);
+        }
+        storeKeyStore(ks);
+    }
 
+    public void saveCertificate(String alias, X509Certificate[] certs) throws CertificateException {
+        KeyStore ks = loadKeyStore();
+
+        String primary = alias + LEAF;
+        try {
+            ks.setCertificateEntry(primary, certs[0]);
+            for (int i = 1; i < certs.length; i++) {
+                String intermediateAlias = alias + "-inter-" + i;
+                ks.setCertificateEntry(intermediateAlias, certs[i]);
+            }
+        } catch (KeyStoreException e) {
+            System.err.println(e.getMessage());
+            throw new CertificateException(e);
+        }
+
+        storeKeyStore(ks);
+    }
+
+    private void storeKeyStore(KeyStore ks) throws CertificateException {
         try (FileOutputStream fos = new FileOutputStream(keystoreFile)) {
             ks.store(fos, password);
+        } catch (FileNotFoundException e) {
+            System.err.println("File not found: " + keystoreFile.getAbsolutePath());
+            throw new CertificateException("Could not fine Keystore file", e);
+        } catch (KeyStoreException | NoSuchAlgorithmException e) {
+            System.err.println(e.getMessage());
+            throw new CertificateException("Could not save Keystore file", e);
+        } catch (IOException e) {
+            System.err.println("Could not save Keystore file" + e.getMessage());
+            throw new CertificateException("IO Error during save of Keystore file", e);
         }
     }
+
 
     /**
      * Retrieves all certificates as a Map (Alias -> Certificate).
      */
-    public Map<String, X509Certificate> getAllCertificates() throws Exception {
+    public Map<String, X509Certificate> getAllCertificates() throws CertificateException {
         KeyStore ks = loadKeyStore();
         Map<String, X509Certificate> certMap = new HashMap<>();
 
-        Enumeration<String> aliases = ks.aliases();
+        Enumeration<String> aliases = null;
+        try {
+            aliases = ks.aliases();
+        } catch (KeyStoreException e) {
+            throw new CertificateException(e);
+        }
         while (aliases.hasMoreElements()) {
             String alias = aliases.nextElement();
-            if (ks.isCertificateEntry(alias)) {
-                certMap.put(alias, (X509Certificate) ks.getCertificate(alias));
+            try {
+                if (ks.isCertificateEntry(alias)) {
+                    certMap.put(alias, (X509Certificate) ks.getCertificate(alias));
+                }
+            } catch (KeyStoreException e) {
+                System.err.println(e.getMessage());
+                throw new CertificateException(e);
             }
         }
         return certMap;
@@ -84,34 +131,60 @@ public class PersistenceManager {
      * Removes the certificate from the keystore that matches the given alias.
      *
      * @param alias used to store the certificate.
-     * @throws Exception if any error during removal of the given alias.
+     * @throws CertificateException if any error during removal of the given alias.
      */
-    public void removeCertificate(String alias) throws Exception {
+    public void removeCertificate(String alias) throws CertificateException {
         KeyStore ks = loadKeyStore();
-        if(ks.containsAlias(alias)){
-            ks.deleteEntry(alias);
-            saveStore(ks);
+        try {
+            if(ks.containsAlias(alias)){
+                ks.deleteEntry(alias);
+                saveStore(ks);
+            }
+        } catch (KeyStoreException e) {
+            System.err.println("Could not remove Keystore entry: " + alias);
+            throw new CertificateException(e);
         }
     }
 
     // --- Private Helper to Load File ---
-    private KeyStore loadKeyStore() throws Exception {
-        KeyStore ks = KeyStore.getInstance(KEYSTORE_TYPE);
+    private KeyStore loadKeyStore() throws CertificateException {
+        KeyStore ks = null;
+        try {
+            ks = KeyStore.getInstance(KEYSTORE_TYPE);
+        } catch (KeyStoreException e) {
+            System.err.println("Unable to load keystore: " + e.getMessage());
+            throw new CertificateException("Failed to load Keystore of type - "+KEYSTORE_TYPE, e);
+        }
+
 
         if (keystoreFile.exists()) {
             try (FileInputStream fis = new FileInputStream(keystoreFile)) {
                 ks.load(fis, password);
+            } catch (FileNotFoundException e) {
+                System.err.println("Unable to load keystore: " + e.getMessage());
+                throw new CertificateException("Could not find Keystore file - "+keystoreFile.getAbsolutePath(), e);
+            } catch (IOException | NoSuchAlgorithmException e) {
+                System.err.println("Unable to load keystore: " + e.getMessage());
+                throw new CertificateException("IO Error loading  Keystore - "+keystoreFile.getAbsolutePath(), e);
             }
         } else {
             // Initialize a new empty keystore if file doesn't exist
-            ks.load(null, password);
+            try {
+                ks.load(null, password);
+            } catch (IOException | NoSuchAlgorithmException e) {
+                System.err.println("Unable to load keystore: " + e.getMessage());
+                throw new CertificateException(e);
+            }
         }
         return ks;
     }
 
-    private void saveStore(KeyStore ks) throws CertificateException, KeyStoreException, IOException, NoSuchAlgorithmException {
+    private void saveStore(KeyStore ks) throws CertificateException{
         try(FileOutputStream fos = new FileOutputStream(keystoreFile)){
             ks.store(fos, password);
+        } catch (KeyStoreException | IOException | NoSuchAlgorithmException e) {
+            System.err.println("Unable to store Keystore - "+keystoreFile.getAbsolutePath());
+            throw new CertificateException(e);
         }
     }
 

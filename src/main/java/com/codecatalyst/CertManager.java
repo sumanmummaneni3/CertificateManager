@@ -24,9 +24,12 @@ import com.codecatalyst.persist.PersistenceManager;
 
 import java.math.BigInteger;
 import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 import static com.codecatalyst.CertConstants.DATE_FMT;
 import static com.codecatalyst.net.NetUtils.*;
@@ -46,50 +49,182 @@ public class CertManager {
     private static final BigInteger MAX_RANGE_SIZE = BigInteger.valueOf(10000);
 
     public static void main(String[] args) {
-        System.out.println("app.log.dir = " + System.getProperty("app.log.dir"));
-        if (args.length == 0) {
+        initializeLogDir();
+        parseAndExecute(args);
+//        if (args.length == 0) {
+//            System.err.println(getHelpMessage());
+//            //logger.error(getHelpMessage());
+//            return;
+//        }
+//
+//        String command = args[0];
+//        try {
+//            System.out.println("Command: " + command.substring(1));
+//            switch (command) {
+//                case "-list":
+//                    printAllCertificates();
+//                    break;
+//                case "-scan":
+//                    handleScanCommand(args);
+//                    break;
+//                case "-rm":
+//                    removeCertificate(args);
+//                    break;
+//                case "-update":
+//                    updateCertificate(args);
+//                    break;
+//                case "-help":
+//                    System.out.println(getHelpMessage());
+//                    break;
+//                case "-version":
+//                    System.out.println("version: 1.0.0");
+//                    System.out.println("Date: 20260201");
+//                    break;
+//                case "-nj":
+//                    handleNinjaOneInput(args);
+//                    break;
+//                default:
+//                    String error = "Unknow command "+ command+"\n"+getHelpMessage();
+//                    logger.error(error);
+//                    System.err.println(error);
+//            }
+//        } catch (Exception e) {
+//            logger.error("Critical Error: ",e);
+//        }
+    }
+
+    /**
+     * Validates the command-line arguments and dispatches to the appropriate handler.
+     * Prints a clear error message to {@code stderr} for any invalid or malformed input.
+     *
+     * @param args the command-line arguments passed to the application
+     */
+    static void parseAndExecute(String[] args) {
+        if (args == null || args.length == 0) {
             System.err.println(getHelpMessage());
-            logger.error(getHelpMessage());
             return;
         }
+
         String command = args[0];
+
         try {
-            System.out.println("Command: " + command.substring(1));
             switch (command) {
-                case "-list":
-                    printAllCertificates();
-                    break;
-                case "-scan":
-                    handleScanCommand(args);
-                    break;
-                case "-rm":
-                    removeCertificate(args);
-                    break;
-                case "-update":
-                    updateCertificate(args);
-                    break;
-                case "-help":
-                    System.out.println(getHelpMessage());
-                    break;
-                case "-version":
+                case "-list" -> printAllCertificates();
+
+                case "-scan" -> {
+                    if (args.length < 2) {
+                        System.err.println("Error: -scan requires a target. Usage: -scan <domain_or_ip> or -scan --range <start_ip> <end_ip>");
+                        return;
+                    }
+                    // Extract --port option from anywhere in the args
+                    Set<Integer> ports = extractPorts(args);
+
+                    if ("--range".equals(args[1])) {
+                        if (args.length < 4) {
+                            System.err.println("Error: --range requires start and end IP. Usage: -scan --range <start_ip> <end_ip>");
+                            return;
+                        }
+                        // Support optional "-" separator: -scan --range <start> - <end>
+                        String startIp = args[2];
+                        String endIp = (args.length >= 5 && "-".equals(args[3])) ? args[4] : args[3];
+                        scanRange(startIp, endIp, ports);
+                    } else {
+                        // Extract host list — supports comma-separated and/or space-separated IPs
+                        List<String> hosts = extractHosts(args);
+                        if (hosts.isEmpty()) {
+                            System.err.println("Error: No valid hosts specified.");
+                            return;
+                        }
+                        for (String host : hosts) {
+                            scanAndStore(host, ports);
+                        }
+                    }
+                }
+
+                case "-rm" -> {
+                    if (args.length < 2) {
+                        System.err.println("Error: -rm requires an alias. Usage: -rm <alias>");
+                        return;
+                    }
+                    removeCertificate(args[1]);
+                }
+
+                case "-update" -> {
+                    if (args.length < 3 || !"--host".equals(args[1])) {
+                        System.err.println("Error: -update requires a host. Usage: -update --host <domain_or_ip>");
+                        return;
+                    }
+                    updateCertificate(args[2]);
+                }
+
+                case "-help" -> System.out.println(getHelpMessage());
+
+                case "-version" -> {
                     System.out.println("version: 1.0.0");
                     System.out.println("Date: 20260201");
-                    break;
-                default:
-                    String error = "Unknow command "+ command+"\n"+getHelpMessage();
+                }
+
+                case "-nj" -> {
+                    if (args.length < 3) {
+                        System.err.println("Error: Invalid NinjaOne input. Usage: -nj -scan <ip> or -nj -scan --range <start_ip> <end_ip>");
+                        return;
+                    }
+                    if (!"-scan".equals(args[1])) {
+                        System.err.println("Error: Unsupported NinjaOne sub-command '" + args[1] + "'. Expected: -scan");
+                        return;
+                    }
+                    Set<Integer> ports = extractPorts(args);
+
+                    if ("--range".equals(args[2])) {
+                        if (args.length < 5) {
+                            System.err.println("Error: --range requires start and end IP. Usage: -nj -scan --range <start_ip> <end_ip>");
+                            return;
+                        }
+                        scanRange(args[3], args[4], ports);
+                    } else {
+                        // Extract hosts starting from index 2 (after -nj -scan)
+                        List<String> hosts = extractHosts(args, 2);
+                        if (hosts.isEmpty()) {
+                            System.err.println("Error: No valid hosts specified.");
+                            return;
+                        }
+                        for (String host : hosts) {
+                            scanAndStore(host, ports);
+                        }
+                    }
+                }
+
+                default -> {
+                    String error = "Unknown command: " + command + "\n" + getHelpMessage();
                     logger.error(error);
                     System.err.println(error);
+                }
             }
-        } catch (Exception e) {
-            logger.error("Critical Error: ",e);
+        } catch (CertificateException e) {
+            logger.error("Critical Error: ", e);
+            System.err.println("Critical Error: " + e.getMessage());
         }
     }
 
-    private static void printAllCertificates() throws Exception {
-        Map<String, X509Certificate> certs = PersistenceManager.getInstance().getAllCertificates();
+
+    private static void handleNinjaOneInput(String[] args) {
+
+    }
+    
+    private static void initializeLogDir() {
+        Path logPath = Paths.get(System.getProperty("user.home"), ".codecatalyst", "logs");
+        try {
+            Files.createDirectories(logPath);
+        } catch (java.io.IOException e) {
+            System.err.println("Could not create log directory: " + e.getMessage());
+        }
+    }
+
+    private static void printAllCertificates() throws CertificateException {
+        Map<String, X509Certificate> certs = Collections.unmodifiableMap(PersistenceManager.getInstance().getAllCertificates());
 
         if (certs.isEmpty()) {
-            System.out.println("📭 Database is empty.");
+            System.out.println("Database is empty.");
             return;
         }
 
@@ -117,26 +252,124 @@ public class CertManager {
     }
 
     private static String truncate(String s, int len) {
+        if (s == null) return "";
+        if (len < 4) return s.substring(0, Math.min(s.length(), len));
         return (s.length() <= len) ? s : s.substring(0, len - 3) + "...";
     }
 
-    private static void handleScanCommand(String[] args) {
-        if (args.length > 1 && args[1].equals("--range")) {
-            // Range Scan
-            String startIp = args[2];
-            String endIp   = (args.length == 5) ? args[4] : args[3];
-
-            scanRange(startIp, endIp);
-
-        } else if (args.length == 2) {
-            // Single Scan
-            scanAndStore(args[1]);
-        } else {
-            System.out.println(getHelpMessage());
+    /**
+     * Scans the arguments array for a {@code --port} option and parses the port values.
+     * <p>Supported formats:</p>
+     * <ul>
+     *   <li>{@code --port 443}         — single port</li>
+     *   <li>{@code --port 80,443,8443} — comma-separated list</li>
+     * </ul>
+     * If {@code --port} is not present, defaults to port {@code 443}.
+     *
+     * @param args the full command-line arguments
+     * @return an ordered set of port numbers to scan
+     */
+    public static Set<Integer> extractPorts(String[] args) {
+        for (int i = 0; i < args.length - 1; i++) {
+            if ("--port".equals(args[i])) {
+                String portValue = args[i + 1];
+                return parsePorts(portValue);
+            }
         }
+        // Default to 443 when --port is not specified
+        return Set.of(443);
     }
 
-    private static void scanRange(String startIp, String endIp) {
+    /**
+     * Extracts host/IP targets from command-line arguments starting after the command flag.
+     * Collects all arguments that are not option flags ({@code --port}, {@code --range}, etc.)
+     * and splits any comma-separated values into individual hosts.
+     * <p>Supported input styles (after shell tokenization):</p>
+     * <ul>
+     *   <li>{@code -scan 192.168.1.1,192.168.1.2}           — single arg, comma-separated</li>
+     *   <li>{@code -scan 192.168.1.1, 192.168.1.2}          — split by shell into two args</li>
+     *   <li>{@code -scan 192.168.1.1 192.168.1.2}           — space-separated, no commas</li>
+     *   <li>{@code -scan 192.168.1.1, 192.168.1.2 --port 8443} — with trailing options</li>
+     * </ul>
+     *
+     * @param args the full command-line arguments
+     * @return list of individual host/IP strings, trimmed and deduplicated in order
+     */
+    public static List<String> extractHosts(String[] args) {
+        return extractHosts(args, 1);
+    }
+
+    /**
+     * Extracts host/IP targets from command-line arguments starting at the given index.
+     *
+     * @param args       the full command-line arguments
+     * @param startIndex the index to begin scanning for hosts
+     * @return list of individual host/IP strings, trimmed and deduplicated in order
+     */
+    static List<String> extractHosts(String[] args, int startIndex) {
+        // Options that signal "stop collecting hosts"
+        Set<String> optionFlags = Set.of("--port", "--range");
+
+        LinkedHashSet<String> hosts = new LinkedHashSet<>();
+
+        for (int i = startIndex; i < args.length; i++) {
+            String arg = args[i];
+
+            // Stop at known option flags and skip their values
+            if (optionFlags.contains(arg)) {
+                break;
+            }
+
+            // Skip the "-" separator used in range syntax
+            if ("-".equals(arg)) {
+                continue;
+            }
+
+            // Split on commas to handle "ip1,ip2" or "ip1," (trailing comma from shell split)
+            String[] parts = arg.split(",");
+            for (String part : parts) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) {
+                    hosts.add(trimmed);
+                }
+            }
+        }
+
+        return new ArrayList<>(hosts);
+    }
+
+    /**
+     * Parses a comma-separated port string into a validated set of port numbers.
+     *
+     * @param portValue comma-separated port string, e.g. "443" or "80,443,8443"
+     * @return an ordered set of valid port numbers
+     * @throws IllegalArgumentException if any port value is not a valid number or out of range
+     */
+    public static Set<Integer> parsePorts(String portValue) {
+        Set<Integer> ports = new LinkedHashSet<>();
+        String[] tokens = portValue.split(",");
+        for (String token : tokens) {
+            String trimmed = token.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            try {
+                int port = Integer.parseInt(trimmed);
+                if (port < 1 || port > 65535) {
+                    throw new IllegalArgumentException("Port out of range (1-65535): " + port);
+                }
+                ports.add(port);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid port number: '" + trimmed + "'");
+            }
+        }
+        if (ports.isEmpty()) {
+            throw new IllegalArgumentException("No valid ports specified in: '" + portValue + "'");
+        }
+        return ports;
+    }
+
+    private static void scanRange(String startIp, String endIp, Set<Integer> ports) {
         try {
             BigInteger start = ipToBigInt(startIp);
             BigInteger end = ipToBigInt(endIp);
@@ -153,12 +386,12 @@ public class CertManager {
                 return;
             }
 
-            logger.info("Scanning Range: {} -> {} ({} hosts)", startIp, endIp, size);
+            logger.info("Scanning Range: {} -> {} ({} hosts) on ports {}", startIp, endIp, size, ports);
 
             // 2. Iteration
             for (BigInteger current = start; current.compareTo(end) <= 0; current = current.add(BigInteger.ONE)) {
                 String ipStr = bigIntToIp(current, startIp.contains(":")); // check if v6 based on input format
-                scanAndStore(ipStr);
+                scanAndStore(ipStr, ports);
             }
 
         } catch (UnknownHostException e) {
@@ -166,22 +399,25 @@ public class CertManager {
         }
     }
 
-    private static void scanAndStore(String host) {
-        System.out.print("Checking " + host + "... ");
-        try {
-            X509Certificate cert = new FetchCertificates(host).fetchCertMetadata();
-            if (Objects.nonNull(cert)) {
-                // DELEGATION: The main class just hands the data to the repository
-                PersistenceManager.getInstance().saveCertificate(host, cert);
-                System.out.println("Saved.");
-                logger.info("Certificate info: " + cert.getIssuerX500Principal().getName());
-            } else {
-                System.out.println("No SSL.");
-                logger.info("SSL Certificate is null !!!");
+    private static void scanAndStore(String host, Set<Integer> ports) {
+        for (int port : ports) {
+            String target = (port == 443) ? host : host + ":" + port;
+            System.out.print("Checking " + target + "... ");
+            try {
+                X509Certificate cert = new FetchCertificates(host, port).fetchCertMetadata();
+                if (cert != null) {
+                    String alias = (port == 443) ? host : host + "_" + port;
+                    PersistenceManager.getInstance().saveCertificate(alias, cert);
+                    System.out.println("Saved.");
+                    logger.info("Certificate info for {}: {}", target, cert.getIssuerX500Principal().getName());
+                } else {
+                    System.out.println("No SSL.");
+                    logger.info("No SSL certificate found on {}", target);
+                }
+            } catch (Exception e) {
+                logger.error("Error scanning {}: ", target, e);
+                System.out.println("Error: " + e.getMessage());
             }
-        } catch (Exception e) {
-            logger.error("Critical Error: ",e);
-            System.out.println("Error: " + e.getMessage());
         }
     }
 
@@ -191,24 +427,32 @@ public class CertManager {
                 
                 === CertManager CLI Usage ===
                 Usage:
-                  1. List DB:         java CertManager -list
-                  2. Scan Single:     java CertManager -scan <domain_or_ip>
-                  3. Scan Range:      java CertManager -scan --range <start_ip> - <end_ip>
+                  1. List DB:          java CertManager -list
+                  2. Scan Single:      java CertManager -scan <domain_or_ip>
+                  3. Scan Multiple:    java CertManager -scan <ip1>, <ip2>, <ip3>
+                  4. Scan with Port:   java CertManager -scan <domain_or_ip> --port <port>
+                  5. Scan with Ports:  java CertManager -scan <ip1>, <ip2> --port <port1,port2,...>
+                  6. Scan Range:       java CertManager -scan --range <start_ip> - <end_ip>
+                  7. Range with Port:  java CertManager -scan --range <start_ip> - <end_ip> --port <port>
+                  8. Remove Cert:      java CertManager -rm <alias>
+                  9. Update Cert:      java CertManager -update --host <domain_or_ip>
+                 10. Help:             java CertManager -help
+                 11. Version:          java CertManager -version
+                
+                Options:
+                  --port <ports>   Comma-separated port(s) to scan (default: 443)
+                                   Examples: --port 8443  or  --port 80,443,8443
                 """;
     }
 
-    private static void removeCertificate(String [] args) throws Exception {
-        logger.info("Removing certificate from database...");
-        String alias  = args[1];
-        logger.info("Removing certificate from database with alias: " + alias);
+    private static void removeCertificate(String alias) throws CertificateException {
+        logger.info("Removing certificate from database with alias: {}", alias);
         PersistenceManager.getInstance().removeCertificate(alias);
     }
 
-    private static void updateCertificate(String [] args) {
-        if(args.length > 2 && "--host".equals(args[1])){
-            String host  = args[2];
-            logger.info("Updating certificate from database...");
-            scanAndStore(host);
-        }
+    private static void updateCertificate(String host) {
+        logger.info("Updating certificate for host: {}", host);
+        Set<Integer> ports = Set.of(443);
+        scanAndStore(host, ports);
     }
 }

@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static com.codecatalyst.CertConstants.*;
+import static com.codecatalyst.persist.PathManager.getAppHome;
 
 public class PersistenceManager {
 
@@ -36,7 +37,7 @@ public class PersistenceManager {
     private final char[] password;
 
     private PersistenceManager(){
-        this.keystoreFile = new File(KEYSTORE_FILE);
+        this.keystoreFile = getAppHome().resolve(KEYSTORE_FILE).toFile();
         this.password = PASSWORD;
     }
 

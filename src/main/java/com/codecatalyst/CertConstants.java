@@ -25,4 +25,5 @@ public class CertConstants {
     public static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("yyyy-MM-dd");
     public static final String LEAF = "-leaf";
     public static final String CHAIN_CERT = "-inter-";
+    public static final String DATA_FOLDER_NAME = ".certmgr";
 }

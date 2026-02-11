@@ -32,7 +32,9 @@ import java.security.cert.X509Certificate;
 import java.util.*;
 
 import static com.codecatalyst.CertConstants.DATE_FMT;
+import static com.codecatalyst.CertConstants.KEYSTORE_FILE;
 import static com.codecatalyst.net.NetUtils.*;
+import static com.codecatalyst.persist.PathManager.getAppHome;
 
 /**
  * This is the main class for Certificate Manager, which is a command line tool
@@ -212,9 +214,10 @@ public class CertManager {
     }
     
     private static void initializeLogDir() {
-        Path logPath = Paths.get(System.getProperty("user.home"), ".codecatalyst", "logs");
+        Path logPath = getAppHome().resolve("logs");
         try {
             Files.createDirectories(logPath);
+            Files.createFile(logPath.resolve("certmgr.log"));
         } catch (java.io.IOException e) {
             System.err.println("Could not create log directory: " + e.getMessage());
         }

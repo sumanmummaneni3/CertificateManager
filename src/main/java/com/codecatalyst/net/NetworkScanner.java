@@ -17,6 +17,7 @@ package com.codecatalyst.net;
 
 import com.codecatalyst.persist.PersistenceManager;
 
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.security.cert.CertificateException;
@@ -42,8 +43,8 @@ public class NetworkScanner {
                     try (Socket socket = new Socket()) {
                         socket.connect(new InetSocketAddress(target, port), 2000);
                         fetchAndStoreCert(target, port);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
+                    } catch (CertificateException | IOException e) {
+                        System.err.println(e.getMessage());
                     }
                 });
             }

@@ -1,7 +1,13 @@
 package com.codecatalyst.service;
 
+import com.codecatalyst.persist.PersistenceManager;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -10,30 +16,35 @@ public class NinjaScanner {
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
-    public static String scan(String input) {
+    public static String getJSONResults() throws CertificateException {
         List<Map<String, Object>> results = new ArrayList<>();
 
-        // Split by newline for file-like strings or comma for single lines
-        String[] lines = input.split("\\R");
+        Map<String, X509Certificate> certificates =  PersistenceManager.getInstance().getAllCertificates();
+        certificates.keySet().forEach(host -> {
+            X509Certificate cert = certificates.get(host);
+            Date expiry = cert.getNotAfter();
+            LocalDate expiryDate = expiry.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+            results.add(processExpiry(host, expiryDate));
+        });
 
-        for (String line : lines) {
-            String[] parts = line.split(",");
-            if (parts.length < 2) continue;
-
-            String alias = parts[0].trim();
-            String expiryStr = parts[1].trim();
-
-            try {
-                LocalDate expiryDate = LocalDate.parse(expiryStr, formatter);
-                results.add(processExpiry(alias, expiryDate));
-            } catch (Exception e) {
-                results.add(createErrorResult(alias, "Invalid Date Format"));
-            }
-        }
+//        for (String line : lines) {
+//            String[] parts = line.split(",");
+//            if (parts.length < 2) continue;
+//
+//            String alias = parts[0].trim();
+//            String expiryStr = parts[1].trim();
+//
+//            try {
+//                LocalDate expiryDate = LocalDate.parse(expiryStr, formatter);
+//                results.add(processExpiry(alias, expiryDate));
+//            } catch (Exception e) {
+//                results.add(createErrorResult(alias, "Invalid Date Format"));
+//            }
+//        }
 
         try {
             return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(results);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             return "{\"error\": \"JSON Generation Failed\"}";
         }
     }

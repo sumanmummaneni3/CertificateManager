@@ -16,6 +16,7 @@
 
 package com.codecatalyst;
 
+import com.codecatalyst.service.NinjaScanner;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -26,13 +27,11 @@ import java.math.BigInteger;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.*;
 
 import static com.codecatalyst.CertConstants.DATE_FMT;
-import static com.codecatalyst.CertConstants.KEYSTORE_FILE;
 import static com.codecatalyst.net.NetUtils.*;
 import static com.codecatalyst.persist.PathManager.getAppHome;
 
@@ -45,54 +44,16 @@ import static com.codecatalyst.persist.PathManager.getAppHome;
 // click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 public class CertManager {
 
-    private static final Logger logger = LogManager.getLogger(CertManager.class);
+    static {
+        initializeLogDir();
+    }
 
+    private static final Logger logger = LogManager.getLogger(CertManager.class);
     // Safety limit to prevent accidental scanning of massive IPv6 subnets
     private static final BigInteger MAX_RANGE_SIZE = BigInteger.valueOf(10000);
 
     public static void main(String[] args) {
-        initializeLogDir();
         parseAndExecute(args);
-//        if (args.length == 0) {
-//            System.err.println(getHelpMessage());
-//            //logger.error(getHelpMessage());
-//            return;
-//        }
-//
-//        String command = args[0];
-//        try {
-//            System.out.println("Command: " + command.substring(1));
-//            switch (command) {
-//                case "-list":
-//                    printAllCertificates();
-//                    break;
-//                case "-scan":
-//                    handleScanCommand(args);
-//                    break;
-//                case "-rm":
-//                    removeCertificate(args);
-//                    break;
-//                case "-update":
-//                    updateCertificate(args);
-//                    break;
-//                case "-help":
-//                    System.out.println(getHelpMessage());
-//                    break;
-//                case "-version":
-//                    System.out.println("version: 1.0.0");
-//                    System.out.println("Date: 20260201");
-//                    break;
-//                case "-nj":
-//                    handleNinjaOneInput(args);
-//                    break;
-//                default:
-//                    String error = "Unknow command "+ command+"\n"+getHelpMessage();
-//                    logger.error(error);
-//                    System.err.println(error);
-//            }
-//        } catch (Exception e) {
-//            logger.error("Critical Error: ",e);
-//        }
     }
 
     /**
@@ -167,7 +128,8 @@ public class CertManager {
                 }
 
                 case "-nj" -> {
-                    if (args.length < 3) {
+                    //We expect -nj -scan  or -nj -scan --range <start_ip> = <end_ip> --port.
+                    if (args.length < 2) {
                         System.err.println("Error: Invalid NinjaOne input. Usage: -nj -scan <ip> or -nj -scan --range <start_ip> <end_ip>");
                         return;
                     }
@@ -175,25 +137,7 @@ public class CertManager {
                         System.err.println("Error: Unsupported NinjaOne sub-command '" + args[1] + "'. Expected: -scan");
                         return;
                     }
-                    Set<Integer> ports = extractPorts(args);
-
-                    if ("--range".equals(args[2])) {
-                        if (args.length < 5) {
-                            System.err.println("Error: --range requires start and end IP. Usage: -nj -scan --range <start_ip> <end_ip>");
-                            return;
-                        }
-                        scanRange(args[3], args[4], ports);
-                    } else {
-                        // Extract hosts starting from index 2 (after -nj -scan)
-                        List<String> hosts = extractHosts(args, 2);
-                        if (hosts.isEmpty()) {
-                            System.err.println("Error: No valid hosts specified.");
-                            return;
-                        }
-                        for (String host : hosts) {
-                            scanAndStore(host, ports);
-                        }
-                    }
+                    handleNinjaOneInput(args);
                 }
 
                 default -> {
@@ -210,14 +154,46 @@ public class CertManager {
 
 
     private static void handleNinjaOneInput(String[] args) {
+        Set<Integer> ports = extractPorts(args);
 
+        if ("--range".equals(args[2])) {
+            if (args.length < 5) {
+                System.err.println("Error: --range requires start and end IP. Usage: -nj -scan --range <start_ip> <end_ip>");
+                return;
+            }
+            scanRange(args[3], args[4], ports);
+        } else {
+            // Extract hosts starting from index 2 (after -nj -scan)
+            List<String> hosts = extractHosts(args, 2);
+            if (hosts.isEmpty()) {
+                System.err.println("Error: No valid hosts specified.");
+                return;
+            }
+            for (String host : hosts) {
+                scanAndStore(host, ports);
+            }
+        }
+        //Fetch the stored data as JSON.
+        try {
+            String result = NinjaScanner.getJSONResults();
+            //For now print this to console.
+            System.out.println(result);
+        } catch (CertificateException e) {
+            System.err.println(e.getMessage());
+        }
     }
     
     private static void initializeLogDir() {
         Path logPath = getAppHome().resolve("logs");
         try {
-            Files.createDirectories(logPath);
-            Files.createFile(logPath.resolve("certmgr.log"));
+            if(!Files.exists(logPath)) {
+                Files.createDirectories(logPath);
+                Path logFile = logPath.resolve("certmgr.log");
+                if(!Files.exists(logFile))
+                    Files.createFile(logFile);
+            }
+
+
         } catch (java.io.IOException e) {
             System.err.println("Could not create log directory: " + e.getMessage());
         }
@@ -418,7 +394,7 @@ public class CertManager {
                     logger.info("No SSL certificate found on {}", target);
                 }
             } catch (Exception e) {
-                logger.error("Error scanning {}: ", target, e);
+                //logger.error("Error scanning {}: ", target, e);
                 System.out.println("Error: " + e.getMessage());
             }
         }
@@ -435,8 +411,8 @@ public class CertManager {
                   3. Scan Multiple:    java CertManager -scan <ip1>, <ip2>, <ip3>
                   4. Scan with Port:   java CertManager -scan <domain_or_ip> --port <port>
                   5. Scan with Ports:  java CertManager -scan <ip1>, <ip2> --port <port1,port2,...>
-                  6. Scan Range:       java CertManager -scan --range <start_ip> - <end_ip>
-                  7. Range with Port:  java CertManager -scan --range <start_ip> - <end_ip> --port <port>
+                  6. Scan Range:       java CertManager -scan --range <start_ip> <end_ip>
+                  7. Range with Port:  java CertManager -scan --range <start_ip> <end_ip> --port <port>
                   8. Remove Cert:      java CertManager -rm <alias>
                   9. Update Cert:      java CertManager -update --host <domain_or_ip>
                  10. Help:             java CertManager -help

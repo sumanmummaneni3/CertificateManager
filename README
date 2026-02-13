@@ -12,7 +12,8 @@ CertGuard is a robust Java CLI application designed for developers and system ad
 ## 🛠 Tech Stack
 
 - **Core**: Java (with Java Keystore API)
-
+- **Network**: Java SSLEngine / Socket API
+- **Formatting**: OpenSSL-compatible outputs
 
 ## 📦 Installation
 

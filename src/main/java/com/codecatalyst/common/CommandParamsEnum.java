@@ -16,6 +16,8 @@
 
 package com.codecatalyst.common;
 
+import java.security.cert.CertificateException;
+
 public enum CommandParamsEnum {
     LIST("-list"),
     SCAN("-scan"),
@@ -37,7 +39,7 @@ public enum CommandParamsEnum {
         return param;
     }
 
-    public static CommandParamsEnum getEnum(String param) {
+    public static CommandParamsEnum getEnum(String param) throws CertificateException {
         return switch (param) {
             case "-list" -> LIST;
             case "-scan" -> SCAN;
@@ -48,7 +50,7 @@ public enum CommandParamsEnum {
             case "-nj" -> NINJA;
             case "-help" -> HELP;
             case "-version" -> VERSION;
-            default -> throw new IllegalArgumentException("Unknown command parameter: " + param);
+            default -> throw new CertificateException("Unknown command: " + param);
         };
     }
 }

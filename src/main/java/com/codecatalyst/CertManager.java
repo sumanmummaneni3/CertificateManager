@@ -69,10 +69,8 @@ public class CertManager {
             return;
         }
 
-        //String command = args[0];
-
-        CommandParamsEnum command =  CommandParamsEnum.getEnum(args[0]);
         try {
+            CommandParamsEnum command =  CommandParamsEnum.getEnum(args[0]);
             switch (command) {
 
                 case LIST -> printAllCertificates();

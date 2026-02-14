@@ -17,6 +17,7 @@ import java.security.KeyStore;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.Date;
+import java.util.Enumeration;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -61,7 +62,7 @@ class PersistenceManagerTest {
             int exitCode = process.waitFor();
             if (exitCode == 0) {
                 System.out.println("Certificate generated successfully in myKeystore.jks");
-                throw new RuntimeException("Keytool failed with exit code: " + exitCode);
+                //throw new RuntimeException("Keytool failed with exit code: " + exitCode);
             }
         } catch (IOException | InterruptedException e) {
             throw new RuntimeException(e);
@@ -90,7 +91,7 @@ class PersistenceManagerTest {
         }
         // 3. Extract the certificate using the alias
         // Note: getCertificate returns java.security.cert.Certificate, so a cast is needed
-        X509Certificate certificate = (X509Certificate) keyStore.getCertificate("Test");
+        X509Certificate certificate = (X509Certificate) keyStore.getCertificate("mycert");
 
         if (certificate == null) {
             throw new RuntimeException("Alias '" + "Test" + "' not found in keystore");

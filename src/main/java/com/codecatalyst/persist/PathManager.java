@@ -6,7 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import static com.codecatalyst.CertConstants.DATA_FOLDER_NAME;
+import static com.codecatalyst.common.CertConstants.DATA_FOLDER_NAME;
 
 public class PathManager {
     public static Path getAppHome() {

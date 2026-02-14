@@ -1,19 +1,57 @@
-# Certificate Manager: Java SSL Certificate Manager & Scanner
+# 🔐 Certificate Manager — Network SSL Certificate Discovery & Monitoring Tool
 
-Certificate Manager is a robust Java CLI application designed for developers and system administrators to manage, scan, and monitor SSL certificates using the Java Keystore API. It provides a streamlined approach to certificate lifecycle management, from parsing CSV inventories to performing live network port scans.
+**Certificate Manager** is a lightweight CLI tool that discovers, inventories, and monitors X.509/SSL certificates across your network and alerts before they expire.
 
-## 🚀 Features
+Built for **MSPs, DevOps engineers, and system administrators**, it helps prevent outages caused by forgotten or expiring certificates.
 
-- **Java Keystore Integration**: Full management of certificates within the Java Keystore environment.
-- **Network Port Scanning**: Identify SSL certificates across various network ports to ensure coverage and compliance.
-- **Security Monitoring**: Automated scanning for expiring or misconfigured SSL certificates.
-- **Lightweight & Fast**: Built with a focus on performance for infrastructure-scale environments.
+Supports standalone environments and **NinjaOne agent-based deployments**.
+---
 
-## 🛠 Tech Stack
+# 🚨 Why this tool exists
 
-- **Core**: Java (with Java Keystore API)
-- **Network**: Java SSLEngine / Socket API
-- **Formatting**: OpenSSL-compatible outputs
+Expired certificates break production systems, websites, and internal services.
+
+Most teams:
+- Don't know where all certificates exist
+- Track them manually in spreadsheets
+- Discover expiry only after outage
+
+Certificate Manager automatically discovers certificates across your infrastructure and alerts before they expire.
+
+---
+
+# ⭐ Key Features
+
+### 🔍 Network Certificate Discovery
+Scan servers and endpoints to identify SSL certificates across ports.
+
+### 📅 Expiry Monitoring & Alerts
+Detect expiring certificates early and avoid outages.
+
+### 🔐 Java Keystore Integration
+Store and manage discovered certificates using Java Keystore.
+
+### 🤖 NinjaOne Integration
+Run via NinjaOne agents to:
+- Discover certificates remotely
+- Store results centrally
+- Monitor managed client environments
+
+### ⚡ Lightweight CLI
+Fast, scriptable, and automation-friendly.
+
+---
+
+# 🖥 Example Output
+% ./CertManager -nj  -scan 192.168.1.1 --port 443
+Checking 192.168.1.1... Saved.
+[ {
+"alias" : "192.168.1.1",
+"expiryDate" : "2036-10-06",
+"daysRemaining" : 3887,
+"status" : "OK"
+} ]
+
 
 ## 📦 Installation
 
@@ -21,3 +59,8 @@ Certificate Manager is a robust Java CLI application designed for developers and
    ```bash
    git clone [https://github.com/sumanmummaneni3/CertificateManager.git](https://github.com/sumanmummaneni3/CertificateManager.git)
    cd CertificateManager
+
+2. **Build and Install the project**
+3. ```bash
+   % ./gradlew clean build
+   % cd build/installer```

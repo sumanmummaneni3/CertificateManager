@@ -26,7 +26,7 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 
-import static com.codecatalyst.CertConstants.*;
+import static com.codecatalyst.common.CertConstants.*;
 import static com.codecatalyst.persist.PathManager.getAppHome;
 
 public class PersistenceManager {

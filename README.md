@@ -43,7 +43,7 @@ Fast, scriptable, and automation-friendly.
 ---
 
 # 🖥 Example Output
-% ./CertManager -nj  -scan 192.168.1.1 --port 443
+% ./CertManager -nj — scan 192.168.1.1 --port 443
 Checking 192.168.1.1... Saved.
 [ {
 "alias" : "192.168.1.1",
@@ -63,4 +63,4 @@ Checking 192.168.1.1... Saved.
 2. **Build and Install the project**
 3. ```bash
    % ./gradlew clean build
-   % cd build/installer```
+   % cd build/installer

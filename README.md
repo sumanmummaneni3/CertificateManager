@@ -57,7 +57,7 @@ Checking 192.168.1.1... Saved.
 
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/sumanmummaneni3/CertificateManager.git](https://github.com/sumanmummaneni3/CertificateManager.git)
+   git clone https://github.com/sumanmummaneni3/CertificateManager.git
    cd CertificateManager
 
 2. **Build and Install the project**

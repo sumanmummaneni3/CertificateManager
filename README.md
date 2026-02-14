@@ -1,6 +1,6 @@
-# CertGuard: Java SSL Certificate Manager & Scanner
+# Certificate Manager: Java SSL Certificate Manager & Scanner
 
-CertGuard is a robust Java CLI application designed for developers and system administrators to manage, scan, and monitor SSL certificates using the Java Keystore API. It provides a streamlined approach to certificate lifecycle management, from parsing CSV inventories to performing live network port scans.
+Certificate Manager is a robust Java CLI application designed for developers and system administrators to manage, scan, and monitor SSL certificates using the Java Keystore API. It provides a streamlined approach to certificate lifecycle management, from parsing CSV inventories to performing live network port scans.
 
 ## 🚀 Features
 

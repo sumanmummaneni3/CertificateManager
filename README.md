@@ -62,6 +62,6 @@ Checking 192.168.1.1... Saved.
    cd CertificateManager
 
 2. **Build and Install the project**
-3. ```bash
+   ```bash
    % ./gradlew clean build
    % cd build/installer

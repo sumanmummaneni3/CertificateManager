@@ -43,6 +43,7 @@ Fast, scriptable, and automation-friendly.
 ---
 
 # 🖥 Example Output
+```
 % ./CertManager -nj — scan 192.168.1.1 --port 443
 Checking 192.168.1.1... Saved.
 [ {

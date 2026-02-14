@@ -52,7 +52,7 @@ Checking 192.168.1.1... Saved.
 "daysRemaining" : 3887,
 "status" : "OK"
 } ]
-
+```
 
 ## 📦 Installation
 

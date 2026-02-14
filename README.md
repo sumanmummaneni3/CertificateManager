@@ -64,4 +64,5 @@ Checking 192.168.1.1... Saved.
 2. **Build and Install the project**
    ```bash
    % ./gradlew clean build
+   % ./gradlew install
    % cd build/installer

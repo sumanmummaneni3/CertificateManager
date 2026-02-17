@@ -56,8 +56,12 @@ public class NinjaScanner {
         String status;
         if (daysRemaining < 0) {
             status = "expired";
-        } else if (daysRemaining <= 30) {
-            status = "expiring in " + daysRemaining + " days";
+        } else if (daysRemaining <= 15) {
+            status = "Critical";
+        } else if (daysRemaining<=30){
+            status = "High";
+        } else if(daysRemaining<=60){
+            status = "Low";
         } else {
             status = "OK";
         }

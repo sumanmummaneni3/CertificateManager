@@ -91,7 +91,8 @@ public class CertManager {
                         // Support optional "-" separator: -scan --range <start> - <end>
                         String startIp = args[2];
                         String endIp = (args.length >= 5 && "-".equals(args[3])) ? args[4] : args[3];
-                        scanRange(startIp, endIp, ports);
+                        List<String> hosts = getHostsInRange(startIp, endIp);
+                        scanRange(hosts, ports);
                     } else {
                         // Extract host list — supports comma-separated and/or space-separated IPs
                         List<String> hosts = extractHosts(args);
@@ -154,18 +155,21 @@ public class CertManager {
     }
 
 
-    private static void handleNinjaOneInput(String[] args) {
+    private static void handleNinjaOneInput(String[] args) throws CertificateException {
         Set<Integer> ports = extractPorts(args);
-
+        Set<String> hostForScan = new HashSet<>();
         if ("--range".equals(args[2])) {
             if (args.length < 5) {
                 System.err.println("Error: --range requires start and end IP. Usage: -nj -scan --range <start_ip> <end_ip>");
                 return;
             }
-            scanRange(args[3], args[4], ports);
+            List<String> hosts = getHostsInRange(args[3], args[4]);
+            scanRange(hosts, ports);
+            hostForScan.addAll(hosts);
         } else {
             // Extract hosts starting from index 2 (after -nj-scan)
             List<String> hosts = extractHosts(args, 2);
+            hostForScan.addAll(hosts);
             if (hosts.isEmpty()) {
                 System.err.println("Error: No valid hosts specified.");
                 return;
@@ -175,13 +179,9 @@ public class CertManager {
             }
         }
         //Fetch the stored data as JSON.
-        try {
-            String result = NinjaScanner.getJSONResults();
-            //For now print this to the console.
-            System.out.println(result);
-        } catch (CertificateException e) {
-            System.err.println(e.getMessage());
-        }
+        String result = NinjaScanner.getJSONResults(List.copyOf(hostForScan));
+        //For now print this to the console.
+        System.out.println(result);
     }
     
     private static void initializeLogDir() {
@@ -350,33 +350,10 @@ public class CertManager {
         }
     }
 
-    private static void scanRange(String startIp, String endIp, Set<Integer> ports) {
-        try {
-            BigInteger start = ipToBigInt(startIp);
-            BigInteger end = ipToBigInt(endIp);
-
-            // 1. Validation
-            if (start.compareTo(end) > 0) {
-                logger.error("Invalid Range: Start IP must be smaller than End IP.");
-                return;
-            }
-
-            BigInteger size = end.subtract(start).add(BigInteger.ONE);
-            if (size.compareTo(MAX_RANGE_SIZE) > 0) {
-                logger.error("Range too large! You are trying to scan {} hosts. Limit is {}.", size, MAX_RANGE_SIZE);
-                return;
-            }
-
-            logger.info("Scanning Range: {} -> {} ({} hosts) on ports {}", startIp, endIp, size, ports);
-
-            // 2. Iteration
-            for (BigInteger current = start; current.compareTo(end) <= 0; current = current.add(BigInteger.ONE)) {
-                String ipStr = bigIntToIp(current, startIp.contains(":")); // check if v6 based on input format
-                scanAndStore(ipStr, ports);
-            }
-
-        } catch (UnknownHostException e) {
-            logger.error("Invalid IP Address format: {}", e.getMessage());
+    private static void scanRange(List<String> hosts, Set<Integer> ports) {
+        //Just iterate the list and invoke scan on each host
+        for(String host : hosts) {
+            scanAndStore(host, ports);
         }
     }
 
@@ -402,6 +379,42 @@ public class CertManager {
         }
     }
 
+    /**
+     * Pure logic to compute a list of IP addresses between two boundaries.
+     *
+     * @param startIp Starting IP string.
+     * @param endIp   Ending IP string.
+     * @return List of strings representing the IP range.
+     */
+    public static List<String> getHostsInRange(String startIp, String endIp) {
+        List<String> hosts = new ArrayList<>();
+        try {
+            BigInteger start = ipToBigInt(startIp);
+            BigInteger end = ipToBigInt(endIp);
+
+            // Validation
+            if (start.compareTo(end) > 0) {
+                logger.error("Invalid Range: Start IP {} is greater than End IP {}.", startIp, endIp);
+                return hosts;
+            }
+
+            BigInteger size = end.subtract(start).add(BigInteger.ONE);
+            if (size.compareTo(MAX_RANGE_SIZE) > 0) {
+                logger.error("Range size {} exceeds limit of {}.", size, MAX_RANGE_SIZE);
+                return hosts;
+            }
+
+            boolean isIPv6 = startIp.contains(":");
+            for (BigInteger current = start; current.compareTo(end) <= 0; current = current.add(BigInteger.ONE)) {
+                hosts.add(bigIntToIp(current, isIPv6));
+            }
+
+        } catch (UnknownHostException e) {
+            logger.error("IP Format Error: {}", e.getMessage());
+        }
+        return hosts;
+    }
+
 
     private static String getHelpMessage(){
         return """
@@ -410,9 +423,9 @@ public class CertManager {
                 Usage:
                   1. List DB:          java CertManager -list
                   2. Scan Single:      java CertManager -scan <domain_or_ip>
-                  3. Scan Multiple:    java CertManager -scan <ip1>, <ip2>, <ip3>
+                  3. Scan Multiple:    java CertManager -scan <ip1> <ip2> <ip3>
                   4. Scan with Port:   java CertManager -scan <domain_or_ip> --port <port>
-                  5. Scan with Ports:  java CertManager -scan <ip1>, <ip2> --port <port1,port2,...>
+                  5. Scan with Ports:  java CertManager -scan <ip1> <ip2> --port <port1 port2,...>
                   6. Scan Range:       java CertManager -scan --range <start_ip> <end_ip>
                   7. Range with Port:  java CertManager -scan --range <start_ip> <end_ip> --port <port>
                   8. Remove Cert:      java CertManager -rm <alias>

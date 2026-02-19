@@ -14,23 +14,23 @@ import java.util.*;
 public class NinjaScanner {
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    public static String getJSONResults() throws CertificateException {
-        List<Map<String, Object>> results = new ArrayList<>();
-
-        Map<String, X509Certificate> certificates =  PersistenceManager.getInstance().getAllCertificates();
-        certificates.keySet().forEach(host -> {
-            X509Certificate cert = certificates.get(host);
-            Date expiry = cert.getNotAfter();
-            LocalDate expiryDate = expiry.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
-            results.add(processExpiry(host, expiryDate));
-        });
-
-        try {
-            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(results);
-        } catch (JsonProcessingException e) {
-            return "{\"error\": \"JSON Generation Failed\"}";
-        }
-    }
+//    public static String getJSONResults() throws CertificateException {
+//        List<Map<String, Object>> results = new ArrayList<>();
+//
+//        Map<String, X509Certificate> certificates =  PersistenceManager.getInstance().getAllCertificates();
+//        certificates.keySet().forEach(host -> {
+//            X509Certificate cert = certificates.get(host);
+//            Date expiry = cert.getNotAfter();
+//            LocalDate expiryDate = expiry.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+//            results.add(processExpiry(host, expiryDate));
+//        });
+//
+//        try {
+//            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(results);
+//        } catch (JsonProcessingException e) {
+//            return "{\"error\": \"JSON Generation Failed\"}";
+//        }
+//    }
 
     public static String getJSONResults(final List<String> alias) throws CertificateException {
         if(alias.isEmpty()){

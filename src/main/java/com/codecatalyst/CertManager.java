@@ -245,7 +245,7 @@ public class CertManager {
 
             System.out.printf(tableRow,
                     truncate(entry.getKey(), 40),
-                    truncate(issuer, 30),
+                    truncate(issuer, 20),
                     DATE_FMT.format(cert.getNotAfter()),
                     days,
                     status);

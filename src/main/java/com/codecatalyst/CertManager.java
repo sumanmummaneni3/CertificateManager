@@ -195,7 +195,7 @@ public class CertManager {
             Set<String> hostList = new HashSet<>();
             hosts.forEach(host -> ports.forEach(port -> {
                 if(port != 443) {
-                    String alias = host + "-" + port;
+                    String alias = host + "_" + port;
                     hostList.add(alias);
                 } else {
                     hostList.add(host);

@@ -30,6 +30,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 import static com.codecatalyst.common.CertConstants.DATE_FMT;
@@ -157,7 +160,7 @@ public class CertManager {
 
     private static void handleNinjaOneInput(String[] args) throws CertificateException {
         Set<Integer> ports = extractPorts(args);
-        Set<String> hostForScan = new HashSet<>();
+        Set<String> hostForScan;
         if ("--range".equals(args[2])) {
             if (args.length < 5) {
                 System.err.println("Error: --range requires start and end IP. Usage: -nj -scan --range <start_ip> <end_ip>");
@@ -165,11 +168,11 @@ public class CertManager {
             }
             List<String> hosts = getHostsInRange(args[3], args[4]);
             scanRange(hosts, ports);
-            hostForScan.addAll(hosts);
+            hostForScan = createHostList(hosts, ports);
         } else {
             // Extract hosts starting from index 2 (after -nj-scan)
             List<String> hosts = extractHosts(args, 2);
-            hostForScan.addAll(hosts);
+            hostForScan = createHostList(hosts, ports);
             if (hosts.isEmpty()) {
                 System.err.println("Error: No valid hosts specified.");
                 return;
@@ -182,6 +185,24 @@ public class CertManager {
         String result = NinjaScanner.getJSONResults(List.copyOf(hostForScan));
         //For now print this to the console.
         System.out.println(result);
+    }
+
+    private static Set<String> createHostList(List<String> hosts, Set<Integer> ports) {
+        if(ports.isEmpty() || (ports.size() == 1 && ports.stream().anyMatch(port -> port == 443))) {
+            //Do not need any mapping of hosts
+            return new HashSet<>(hosts);
+        } else {
+            Set<String> hostList = new HashSet<>();
+            hosts.forEach(host -> ports.forEach(port -> {
+                if(port != 443) {
+                    String alias = host + "-" + port;
+                    hostList.add(alias);
+                } else {
+                    hostList.add(host);
+                }
+            }));
+            return hostList;
+        }
     }
     
     private static void initializeLogDir() {
@@ -208,19 +229,34 @@ public class CertManager {
             return;
         }
 
-        System.out.printf("%-40s %-30s %-15s%n", "HOST (ALIAS)", "ISSUER", "EXPIRY");
-        System.out.println("--------------------------------------------------------------------------------------");
+        String tableHeader = "%-35s %-25s %-12s %-10s %-12s%n";
+        String tableRow    = "%-35s %-25s %-12s %-10s %-12s%n";
+
+        System.out.println("\n--- CERTIFICATE REPOSITORY ---");
+        System.out.printf(tableHeader, "HOST (ALIAS)", "ISSUER", "EXPIRY", "DAYS LEFT", "STATUS");
+        System.out.println("-".repeat(100));
 
         for (Map.Entry<String, X509Certificate> entry : certs.entrySet()) {
             X509Certificate cert = entry.getValue();
             String issuer = parseCN(cert.getIssuerX500Principal().getName());
+            long daysRemaining =  getDaysRemaining(cert);
+            String days = Long.toString(daysRemaining);
+            String status = NinjaScanner.getStatus(daysRemaining);
 
-            System.out.printf("%-40s %-30s %-15s%n",
+            System.out.printf(tableRow,
                     truncate(entry.getKey(), 40),
                     truncate(issuer, 30),
-                    DATE_FMT.format(cert.getNotAfter())
-            );
+                    DATE_FMT.format(cert.getNotAfter()),
+                    days,
+                    status);
         }
+    }
+
+    private static long getDaysRemaining(X509Certificate cert) {
+        Date expiry = cert.getNotAfter();
+        LocalDate expiryDate = expiry.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        LocalDate today = LocalDate.now();
+        return ChronoUnit.DAYS.between(today, expiryDate);
     }
 
     private static String parseCN(String dn) {

@@ -14,23 +14,23 @@ import java.util.*;
 public class NinjaScanner {
     private static final ObjectMapper mapper = new ObjectMapper();
 
-//    public static String getJSONResults() throws CertificateException {
-//        List<Map<String, Object>> results = new ArrayList<>();
-//
-//        Map<String, X509Certificate> certificates =  PersistenceManager.getInstance().getAllCertificates();
-//        certificates.keySet().forEach(host -> {
-//            X509Certificate cert = certificates.get(host);
-//            Date expiry = cert.getNotAfter();
-//            LocalDate expiryDate = expiry.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
-//            results.add(processExpiry(host, expiryDate));
-//        });
-//
-//        try {
-//            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(results);
-//        } catch (JsonProcessingException e) {
-//            return "{\"error\": \"JSON Generation Failed\"}";
-//        }
-//    }
+    public static String getJSONResults() throws CertificateException {
+        List<Map<String, Object>> results = new ArrayList<>();
+
+        Map<String, X509Certificate> certificates =  PersistenceManager.getInstance().getAllCertificates();
+        certificates.keySet().forEach(host -> {
+            X509Certificate cert = certificates.get(host);
+            Date expiry = cert.getNotAfter();
+            LocalDate expiryDate = expiry.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+            results.add(processExpiry(host, expiryDate));
+        });
+
+        try {
+            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(results);
+        } catch (JsonProcessingException e) {
+            return "{\"error\": \"JSON Generation Failed\"}";
+        }
+    }
 
     public static String getJSONResults(final List<String> alias) throws CertificateException {
         if(alias.isEmpty()){
@@ -58,6 +58,17 @@ public class NinjaScanner {
         LocalDate today = LocalDate.now();
         long daysRemaining = ChronoUnit.DAYS.between(today, expiryDate);
 
+        String status = getStatus(daysRemaining);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("alias", alias);
+        result.put("expiryDate", expiryDate.toString());
+        result.put("daysRemaining", daysRemaining);
+        result.put("status", status);
+        return result;
+    }
+
+    public static String getStatus(long daysRemaining) {
         String status;
         if (daysRemaining < 0) {
             status = "expired";
@@ -70,13 +81,7 @@ public class NinjaScanner {
         } else {
             status = "OK";
         }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("alias", alias);
-        result.put("expiryDate", expiryDate.toString());
-        result.put("daysRemaining", daysRemaining);
-        result.put("status", status);
-        return result;
+        return status;
     }
 
 //    private static Map<String, Object> createErrorResult(String alias, String error) {

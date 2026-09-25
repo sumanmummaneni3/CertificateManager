@@ -52,9 +52,17 @@ class AuditRunnerTest {
     static AuditRunner runner(CtLogSource ct) {
         ServedStateProber prober = new ServedStateProber(host -> {
             if (host.startsWith("gone")) throw new UnknownHostException(host + ": Name or service not known");
+            if (host.startsWith("split")) {
+                return new InetAddress[]{InetAddress.getByName("192.0.2.1"), InetAddress.getByName("192.0.2.2")};
+            }
             return new InetAddress[]{InetAddress.getByName("192.0.2.1")};
-        }, (addr, host, port) -> new ServedHandshake(new X509Certificate[]{host.startsWith("api") ? API_LEAF : C.leaf(), C.inter()},
-                "TLSv1.3", "TLS_AES_128_GCM_SHA256"), 2, CLOCK);
+        }, (addr, host, port) -> {
+            if (addr.getHostAddress().equals("192.0.2.2")) {
+                throw new java.security.cert.CertificateException("wrapped", new java.net.SocketTimeoutException("Read timed out"));
+            }
+            return new ServedHandshake(new X509Certificate[]{host.startsWith("api") ? API_LEAF : C.leaf(), C.inter()},
+                "TLSv1.3", "TLS_AES_128_GCM_SHA256");
+        }, 2, CLOCK);
         CaaResolver caa = new CaaResolver(name -> name.equals("example.com")
                 ? new CaaAnswer(0, "NOERROR", false, List.of(new CaaProperty(0, "issue", "letsencrypt.org")))
                 : new CaaAnswer(0, "NOERROR", false, List.of()), "8.8.8.8", CLOCK);
@@ -136,5 +144,48 @@ class AuditRunnerTest {
         assertFalse(caa.remediation().isBlank());
         assertEquals("tester", r.meta().requester());
         assertEquals(NOW, r.meta().startedAt());
+    }
+
+    @Test
+    @DisplayName("An unreachable address behind a reachable host gets its own VER ERROR row, never only a qualified OK")
+    void partialReachIsAnError() throws Exception {
+        AuditReport r = runner(ct(List.of(), null)).run(List.of(target("split.example.com", "example.com")), List.of(), null, META);
+        List<CheckStatus> ver = coverage(r, "ver");
+        assertTrue(ver.contains(CheckStatus.error("split.example.com:443@192.0.2.2", "ver", "SocketTimeoutException: Read timed out")), ver.toString());
+        assertEquals(1, ver.stream().filter(c -> c.status() == CheckStatus.Status.ERROR).count());
+        CheckStatus hostRow = ver.stream().filter(c -> c.subject().equals("split.example.com:443")).findFirst().orElseThrow();
+        assertEquals(CheckStatus.Status.OK, hostRow.status());
+        assertTrue(hostRow.message().startsWith("1 of 2 addresses reached"));
+    }
+
+    @Test
+    @DisplayName("CT-03 names the unreachable endpoints it could not compare, and its finding says 'no reachable audited endpoint'")
+    void ct03NamesUnreachable() throws Exception {
+        X509Certificate stray = cert("shadow.example.com").issuedBy(C.inter(), INTER_KEY).build();
+        AuditReport r = runner(ct(List.of(ctFor(9, stray)), null))
+                .run(List.of(target("split.example.com", "example.com")), List.of(), null, META);
+        CheckStatus ct03 = coverage(r, "ct03").get(0);
+        assertEquals(CheckStatus.Status.OK, ct03.status());
+        assertTrue(ct03.message().contains("split.example.com:443@192.0.2.2"), ct03.message());
+        Finding f = r.findings().stream().filter(x -> x.type().equals("UNOBSERVED_ISSUANCE")).findFirst().orElseThrow();
+        assertTrue(f.detail().endsWith("no reachable audited endpoint serves it"), f.detail());
+    }
+
+    @Test
+    @DisplayName("An IP-address host is not CAA-checked: CAA covers domain names only, so no false CAA_ABSENT")
+    void ipHostSkipsCaa() throws Exception {
+        AuditReport r = runner(ct(List.of(), null)).run(List.of(target("192.0.2.10", null)), List.of(), null, META);
+        assertEquals(List.of(CheckStatus.notChecked("192.0.2.10", "caa", "CAA does not apply to IP addresses")), coverage(r, "caa"));
+        assertTrue(r.findings().stream().noneMatch(f -> f.type().startsWith("CAA_")));
+        assertTrue(r.caa().isEmpty());
+    }
+
+    @Test
+    @DisplayName("isIpLiteral recognises IPv4 and IPv6 literals but not hostnames that start with digits")
+    void ipLiteral() {
+        assertTrue(AuditRunner.isIpLiteral("10.0.0.5"));
+        assertTrue(AuditRunner.isIpLiteral("2001:db8::1"));
+        assertFalse(AuditRunner.isIpLiteral("1.example.com"));
+        assertFalse(AuditRunner.isIpLiteral("123.45.67.com"));
     }
 }

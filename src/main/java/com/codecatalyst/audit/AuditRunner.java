@@ -83,6 +83,11 @@ public class AuditRunner {
         Map<String, AuditTarget> caaHosts = new LinkedHashMap<>();
         for (AuditTarget t : targets) caaHosts.putIfAbsent(t.host(), t);
         for (AuditTarget t : caaHosts.values()) {
+            if (isIpLiteral(t.host())) {
+                // RFC 8659 covers domain names only; climbing an IP's octets would report a false CAA_ABSENT (D12)
+                coverage.add(CheckStatus.notChecked(t.host(), "caa", "CAA does not apply to IP addresses"));
+                continue;
+            }
             try {
                 CaaResolution r = caa.resolve(t.host());
                 caaResults.add(r);
@@ -116,7 +121,7 @@ public class AuditRunner {
                 try {
                     List<AddressObservation> obs = e.getValue().get();
                     out.put(t, obs);
-                    coverage.add(verStatus(t, obs));
+                    coverage.addAll(verStatus(t, obs));
                 } catch (ExecutionException ex) {
                     Throwable c = ex.getCause();
                     String msg = (c instanceof UnknownHostException)
@@ -131,18 +136,31 @@ public class AuditRunner {
         }
     }
 
-    private static CheckStatus verStatus(AuditTarget t, List<AddressObservation> obs) {
-        long down = obs.stream().filter(o -> !o.reachable()).count();
-        if (obs.isEmpty()) return CheckStatus.error(t.hostPort(), "ver", "the name resolved to no addresses");
-        StringBuilder errs = new StringBuilder();
-        obs.stream().filter(o -> !o.reachable())
-                .forEach(o -> errs.append(errs.isEmpty() ? "" : "; ").append(o.address()).append(": ").append(o.error()));
-        if (down == obs.size()) return CheckStatus.error(t.hostPort(), "ver", "every address unreachable — " + errs);
-        if (down > 0) {
-            return new CheckStatus(t.hostPort(), "ver", CheckStatus.Status.OK,
-                    down + " of " + obs.size() + " addresses unreachable — " + errs);
+    /**
+     * VER coverage (D8, made explicit at design audit): one row per host:port, plus one ERROR row per
+     * unreachable address with its error as received. A partial result is never an OK row that only a
+     * free-text message qualifies; the per-address rows count as failed checks.
+     */
+    static List<CheckStatus> verStatus(AuditTarget t, List<AddressObservation> obs) {
+        if (obs.isEmpty()) return List.of(CheckStatus.error(t.hostPort(), "ver", "the name resolved to no addresses"));
+        List<CheckStatus> out = new ArrayList<>();
+        long reached = obs.stream().filter(AddressObservation::reachable).count();
+        if (reached == 0) {
+            out.add(CheckStatus.error(t.hostPort(), "ver", "every address unreachable (" + obs.size() + ")"));
+        } else if (reached < obs.size()) {
+            out.add(new CheckStatus(t.hostPort(), "ver", CheckStatus.Status.OK,
+                    reached + " of " + obs.size() + " addresses reached; each unreachable address has its own ERROR row"));
+        } else {
+            out.add(CheckStatus.ok(t.hostPort(), "ver"));
         }
-        return CheckStatus.ok(t.hostPort(), "ver");
+        for (AddressObservation o : obs) {
+            if (!o.reachable()) out.add(CheckStatus.error(o.subject(), "ver", o.error()));
+        }
+        return out;
+    }
+
+    static boolean isIpLiteral(String host) {
+        return host.matches("\\d{1,3}(\\.\\d{1,3}){3}") || host.contains(":");
     }
 
     private static void chainChange(AuditTarget t, List<AddressObservation> obs, BaselineLoader.Baseline baseline,
@@ -187,6 +205,10 @@ public class AuditRunner {
             if (o.reachable()) served.add(new CtReconciler.ServedLeaf(o.chain()[0], o.leafSha256(), o.evidence()));
         }
 
+        // CT-03 compares against the whole run, so an unreachable endpoint anywhere could be the one
+        // serving an issuance; the ct03 row names them rather than implying full coverage (D13).
+        List<String> unreachable = allObs.stream().filter(o -> !o.reachable()).map(AddressObservation::subject).toList();
+
         List<CtDomainResult> out = new ArrayList<>();
         for (var e : byDomain.entrySet()) {
             String domain = e.getKey();
@@ -219,7 +241,10 @@ public class AuditRunner {
             CtReconciler.Outcome oc = CtReconciler.detectUnobserved(domain, issuances, served, now,
                     fetched.fetchedAt(), ctFetchDer ? ct::fetchDer : null);
             findings.addAll(oc.findings());
-            coverage.add(CheckStatus.ok(domain, "ct03"));
+            coverage.add(unreachable.isEmpty()
+                    ? CheckStatus.ok(domain, "ct03")
+                    : new CheckStatus(domain, "ct03", CheckStatus.Status.OK,
+                    "compared against reachable endpoints only; not compared: " + String.join(", ", unreachable)));
             if (!oc.derErrors().isEmpty()) {
                 coverage.add(CheckStatus.error(domain, "ct-der", String.join(" | ", oc.derErrors())));
             }

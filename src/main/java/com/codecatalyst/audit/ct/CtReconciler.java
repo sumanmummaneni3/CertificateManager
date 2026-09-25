@@ -103,7 +103,7 @@ public final class CtReconciler {
                         "serial " + iss.serialHex(),
                         "issued by " + iss.issuerName() + " for " + String.join(", ", iss.names())
                                 + ", valid " + iss.notBefore() + " to " + iss.notAfter() + ", first logged "
-                                + iss.firstSeen() + "; no audited endpoint serves it",
+                                + iss.firstSeen() + "; no reachable audited endpoint serves it",
                         iss.evidence(), fetchedAt));
                 continue;
             }

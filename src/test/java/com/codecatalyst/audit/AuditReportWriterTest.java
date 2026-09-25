@@ -35,7 +35,9 @@ class AuditReportWriterTest {
                 List.of(o),
                 Map.of(fps.get(0), CertSummary.of(C.leaf()), fps.get(1), CertSummary.of(C.inter())),
                 List.of(), List.of(), List.of(f),
-                List.of(CheckStatus.error("example.com", "ct", "crt.sh HTTP 502 for https://crt.sh/?q=example.com&output=json (attempt 2 of 2): <title>502 Bad Gateway</title>")));
+                List.of(new CheckStatus("www.example.com:443", "ver", CheckStatus.Status.OK, "1 of 2 addresses reached; each unreachable address has its own ERROR row"),
+                        CheckStatus.error("www.example.com:443@192.0.2.9", "ver", "SocketTimeoutException: Read timed out"),
+                        CheckStatus.error("example.com", "ct", "crt.sh HTTP 502 for https://crt.sh/?q=example.com&output=json (attempt 2 of 2): <title>502 Bad Gateway</title>")));
     }
 
     @Test
@@ -47,6 +49,8 @@ class AuditReportWriterTest {
         assertTrue(md.contains("crt.sh HTTP 502"), "CT failure appears in the report");
         assertTrue(md.contains("| 3 | port out of range | `bad\\|row` |"), "a pipe in the raw row cannot break the table");
         assertTrue(md.contains("TODO (hand-written)"));
+        assertTrue(md.contains("| www.example.com:443@192.0.2.9 | ver | ERROR | SocketTimeoutException: Read timed out |"), "unreachable address listed as a gap");
+        assertTrue(md.contains("1 of 2 addresses reached"), "qualified OK row listed as a gap");
         assertTrue(md.contains("www.example.com:443"), "unowned row listed under ownership gaps");
         String json = Files.readString(w.json());
         assertTrue(json.contains("\"why\""));

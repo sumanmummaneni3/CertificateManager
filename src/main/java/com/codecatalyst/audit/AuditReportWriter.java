@@ -128,8 +128,10 @@ public final class AuditReportWriter {
     }
 
     private static String coverageGaps(AuditReport r) {
+        // Every non-OK row, plus OK rows that carry a qualification (partial reach, unreachable endpoints
+        // not compared); a ct row's OK message is only its fetch time, so it is left out.
         List<CheckStatus> gaps = r.coverage().stream()
-                .filter(c -> c.status() != CheckStatus.Status.OK || (c.check().equals("ver") && !c.message().isEmpty()))
+                .filter(c -> c.status() != CheckStatus.Status.OK || (!c.message().isEmpty() && !c.check().equals("ct")))
                 .toList();
         if (gaps.isEmpty()) return "Every check ran for every subject.\n";
         StringBuilder sb = new StringBuilder("| Subject | Check | Status | Message |\n|---|---|---|---|\n");

@@ -4,8 +4,9 @@ design, then what it deliberately does not do. Append-only — never delete or r
 strike through and re-date if superseded. This repo's D-numbers are its own sequence, separate
 from Monitor360's (see CLAUDE.md's Scope note).
 
-Next free number: D12 (D5–D7 and D9–D11 are backlog rows; D5–D7 filed alongside D1–D4 — the D-number
-sequence is shared between architecture.md and backlog.md, per Monitor360's own convention).
+Next free number: D14 (D5–D7 and D9–D13 are backlog rows; D5–D7 filed alongside D1–D4, D12–D13 by
+D8's design audit — the D-number sequence is shared between architecture.md and backlog.md, per
+Monitor360's own convention).
 -->
 
 ## D8 — Amendments to D1–D4 before implementation (gap review, 2026-09-25)
@@ -13,7 +14,16 @@ sequence is shared between architecture.md and backlog.md, per Monitor360's own 
 **Status:** approved 2026-09-25 (the user reviewed the gap table this record answers and asked for
 every row to be implemented). **Implemented 2026-09-25, with D1–D4, in the same session: 72 new unit
 tests, 85 in the suite, all passing. Built, not field-verified:** acceptance gate items 2 and 4
-below are met and items 1 and 3 are open. No separate reviewer or architect-audit pass was run.
+below are met and items 1 and 3 are open. ~~No separate reviewer or architect-audit pass was run.~~
+*(2026-09-25, later: Reviewer PASS on commit `d4201ac`. Architect design audit of `d4201ac`: **not
+certified.** One DESIGN_VIOLATION, routed to the Developer: a host:port with some addresses
+unreachable is recorded as a `ver` `OK` row, see "Findings and reports" below. Two blueprint gaps
+filed as backlog D12 and D13.)*
+*(2026-09-25, re-audit of the uncommitted fix on top of `d4201ac`: **CERTIFIED as built.** The
+violation is fixed: each unreachable address has its own `ver` `ERROR` row, which counts as a failed
+check. D12 and D13 are fixed as filed. 89 unit tests, all passing. Still **not field-verified**:
+acceptance gate items 1 and 3 remain open (backlog D11), and no real crt.sh answer has ever been
+parsed.)*
 **Amends:** D1, D2, D3, D4. Where this record and D1–D4 disagree,
 **this record wins**; D1–D4 are left unedited as history.
 
@@ -120,10 +130,18 @@ served on a host listed under another. When no host under the domain was reachab
 recorded as `NOT_CHECKED` for that domain rather than flagging every issuance. crt.sh requests use
 a 30 s timeout rather than D3's 15 s, since large domains routinely take longer.)*
 Issuer comparison parses both sides with `javax.naming.ldap.LdapName` and compares the RDN sets, so
-crt.sh's `C=US, O=Let's Encrypt, CN=R11` equals Java's `CN=R11,O=Let's Encrypt,C=US`. Only
+crt.sh's `C=US, O=Let's Encrypt, CN=R11` equals Java's `CN=R11,O=Let's Encrypt,C=US`.
+*(Corrected 2026-09-25 at design audit: exact RDN-set equality was wrong as written. Java's
+`X500Principal.getName()` hex-encodes attributes it has no keyword for, e.g. `emailAddress` becomes
+`1.2.840.113549.1.9.1=#16…`, while crt.sh spells it out, so the two sets can never be equal for such
+an issuer. `IssuerNames.same` compares the keyword-named attributes present on both sides, requires
+`CN` to be among them, and requires every shared attribute to be equal. Serial equality is still
+required as well.)* Only
 issuances **currently valid at run time** are checked; expired ones stay in the export as history
-and raise nothing. The cross-check is against **every observation in the run** whose host falls
-under that CT domain, not the one row. With `--ct-fetch-der` (default off), final-certificate
+and raise nothing. ~~The cross-check is against **every observation in the run** whose host falls
+under that CT domain, not the one row.~~ *(Superseded 2026-09-25 by the implementation note above:
+the cross-check is against every leaf served anywhere in the run. This sentence contradicted that
+note and is struck so the record has one rule.)* With `--ct-fetch-der` (default off), final-certificate
 entries that matched on `(issuer, serial)` are fetched as DER from `https://crt.sh/?d=<id>` and
 must also match on SHA-256; a mismatch raises `CT_FINGERPRINT_MISMATCH` (High). This closes
 backlog D7 as an opt-in.
@@ -144,6 +162,11 @@ has both. Outputs per run:
   evidence, observed_at`.
 - `audit-<ts>-coverage.csv`: one row per (subject, check) with `OK | ERROR | NOT_CHECKED` and the
   message. This is where a gap is kept from looking like a pass.
+  *(Made explicit 2026-09-25 at design audit: `OK` means the check ran on everything under that
+  subject. If a host:port resolves to N addresses and some of them are unreachable, each
+  unreachable address gets its own `ver` row, subject `host:port@address`, status `ERROR`, with the
+  error as received. Those rows count toward the run's failed-check total and exit code. A partial
+  result is never an `OK` row that only a free-text message qualifies.)*
 - `audit-<ts>-report.md`: the template (`src/main/resources/audit-report-template.md`) with the
   counts, findings tables, coverage and inventory filled in, and `TODO (hand-written)` markers for
   the executive summary narrative and automation-readiness section (AUTO is not in Phase 0). Hosts

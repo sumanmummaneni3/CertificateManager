@@ -16,6 +16,8 @@
 
 package com.codecatalyst;
 
+import com.codecatalyst.audit.AuditCommand;
+import com.codecatalyst.audit.AuditOptions;
 import com.codecatalyst.common.CommandParamsEnum;
 import com.codecatalyst.service.NinjaScanner;
 import org.apache.logging.log4j.LogManager;
@@ -123,6 +125,17 @@ public class CertManager {
                         return;
                     }
                     updateCertificate(args[2]);
+                }
+
+                case AUDIT -> {
+                    AuditOptions options;
+                    try {
+                        options = AuditOptions.parse(args, 1);
+                    } catch (IllegalArgumentException e) {
+                        System.err.println("Error: " + e.getMessage() + "\nUsage: " + AuditOptions.USAGE);
+                        return;
+                    }
+                    AuditCommand.execute(options);
                 }
 
                 case HELP -> System.out.println(getHelpMessage());
@@ -468,10 +481,22 @@ public class CertManager {
                   9. Update Cert:      java CertManager -update --host <domain_or_ip>
                  10. Help:             java CertManager -help
                  11. Version:          java CertManager -version
+                 12. Audit:            java CertManager -audit --csv <file> --requester <name> --basis <OWN|CONSENT|PUBLIC_PROSPECT>
                 
                 Options:
                   --port <ports>   Comma-separated port(s) to scan (default: 443)
                                    Examples: --port 8443  or  --port 80,443,8443
+
+                Audit options (-audit):
+                  --csv <file>          Header row required: host (required), port, domain, owner, tags
+                  --requester <name>    Who asked for this run (recorded in the report and run log)
+                  --basis <basis>       OWN, CONSENT or PUBLIC_PROSPECT
+                  --out <dir>           Where to write the four output files (default: current dir)
+                  --baseline <json>     A previous run's audit-*.json, to detect chain changes
+                  --resolver <ip>       Recursive DNS resolver for CAA (default: 8.8.8.8)
+                  --concurrency <n>     Parallel handshakes (default: 4)
+                  --ct-cache-ttl <h>    Reuse crt.sh answers up to this many hours old (default 6, 0 = off)
+                  --ct-fetch-der        Also match served certificates to CT entries by SHA-256 (slow)
                 """;
     }
 

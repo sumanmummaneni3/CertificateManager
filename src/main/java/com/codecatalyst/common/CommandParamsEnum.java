@@ -26,6 +26,7 @@ public enum CommandParamsEnum {
     REMOVE("-rm"),
     UPDATE("-update"),
     NINJA("-nj"),
+    AUDIT("-audit"),
     HELP("-help"),
     VERSION("-version");
 
@@ -48,6 +49,7 @@ public enum CommandParamsEnum {
             case "-rm" -> REMOVE;
             case "-update" -> UPDATE;
             case "-nj" -> NINJA;
+            case "-audit" -> AUDIT;
             case "-help" -> HELP;
             case "-version" -> VERSION;
             default -> throw new CertificateException("Unknown command: " + param);

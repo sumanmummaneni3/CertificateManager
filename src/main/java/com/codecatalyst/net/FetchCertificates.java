@@ -21,6 +21,7 @@ import org.apache.logging.log4j.Logger;
 
 import javax.net.ssl.*;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.security.KeyManagementException;
@@ -45,8 +46,19 @@ public class FetchCertificates {
             }
     };
 
+   // Without a read timeout a server that accepts TCP but never answers the handshake hangs the scan forever
+   private static final int HANDSHAKE_TIMEOUT_MS = 10_000;
+
+   /**
+    * One handshake's result: the served chain in the order the server sent it (leaf first), and the
+    * negotiated protocol and cipher suite (VER-01).
+    */
+   public record ServedHandshake(X509Certificate[] chain, String protocol, String cipherSuite) {}
+
    private final String host;
    private int port = -1;
+   // When set, connect to exactly this address instead of resolving host (D2: per-address probing)
+   private InetAddress address;
 
 
     public FetchCertificates(String host){
@@ -61,19 +73,58 @@ public class FetchCertificates {
     }
 
 
+    /**
+     * Connects to {@code address} while sending {@code sniHost} as SNI, so one hostname can be probed
+     * on each of its resolved addresses (D2).
+     */
+    public FetchCertificates(InetAddress address, String sniHost, int port){
+        this.host = sniHost;
+        this.port = port;
+        this.address = address;
+    }
+
+
     public X509Certificate fetchCertMetadata() throws CertificateException{
+        try {
+            X509Certificate[] chain = fetchHandshake().chain();
+            return (chain.length > 0) ? chain[0] : null;
+        } catch (CertificateException e) {
+            System.err.println(e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Performs one handshake and returns the full served chain plus protocol and cipher. The
+     * trust-all manager is deliberate: the chain is captured as served, whether or not it is valid.
+     */
+    public ServedHandshake fetchHandshake() throws CertificateException {
         try {
             SSLContext sc = SSLContext.getInstance("TLS");
             sc.init(null, trustAllCerts, new java.security.SecureRandom());
             SSLSocketFactory factory = sc.getSocketFactory();
             Socket socket = new Socket();
-            socket.connect(new InetSocketAddress(host, port), 1500); // Fast 1.5s timeout
-            SSLSocket sslSocket = (SSLSocket) factory.createSocket(socket, host, port, true);
-            sslSocket.startHandshake();
-            java.security.cert.Certificate[] serverCerts = sslSocket.getSession().getPeerCertificates();
-            return (serverCerts.length > 0) ? (X509Certificate) serverCerts[0] : null;
+            InetSocketAddress remote = (address != null)
+                    ? new InetSocketAddress(address, port)
+                    : new InetSocketAddress(host, port);
+            try {
+                socket.connect(remote, 1500); // Fast 1.5s timeout
+                socket.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
+            } catch (IOException e) {
+                socket.close();
+                throw e;
+            }
+            try (SSLSocket sslSocket = (SSLSocket) factory.createSocket(socket, host, port, true)) {
+                sslSocket.startHandshake();
+                SSLSession session = sslSocket.getSession();
+                java.security.cert.Certificate[] serverCerts = session.getPeerCertificates();
+                X509Certificate[] chain = new X509Certificate[serverCerts.length];
+                for (int i = 0; i < serverCerts.length; i++) {
+                    chain[i] = (X509Certificate) serverCerts[i];
+                }
+                return new ServedHandshake(chain, session.getProtocol(), session.getCipherSuite());
+            }
         } catch (KeyManagementException | IOException | NoSuchAlgorithmException e) {
-            System.err.println("Error while fetching certificates: " + e.getMessage());
             throw new CertificateException("Error while fetching certificates: " + e.getMessage(), e);
         }
     }

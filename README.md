@@ -54,6 +54,32 @@ Checking 192.168.1.1... Saved.
 } ]
 ```
 
+# 🔎 Certificate audit (`-audit`)
+
+Runs an external, evidence-first assessment of a list of hosts. It uses public data plus one
+standard TLS handshake per address on the listed port:
+
+- **Served state:** every A/AAAA address is handshaken with SNI; different leaves or chains behind
+  one name are flagged (`NODE_DIVERGENCE`).
+- **Chains:** missing intermediates, AIA-only completion, wrong order, root included, expired or
+  weak certificates. With `--baseline <previous audit json>`, a chain that changed under an unchanged
+  leaf is flagged too.
+- **Certificate Transparency (crt.sh):** currently valid certificates for the domain that no audited
+  endpoint serves.
+- **CAA:** effective policy per RFC 8659, missing `accounturi` / `validationmethods` and
+  unrestricted wildcards.
+
+```
+java -jar CertificateManager.jar -audit --csv targets.csv --requester "Your Name" --basis CONSENT --out ./audit
+```
+
+`targets.csv` needs a header row: `host` (required), `port`, `domain`, `owner`, `tags`. Each run
+writes four files: a JSON export, a findings CSV (with why-it-matters and remediation), a coverage
+CSV that lists every check that failed or did not run, and a Markdown report to finish by hand.
+**A subject only counts as clean when its checks are OK in the coverage file.** crt.sh is
+rate-limited to one request every 12.5 s, so CT takes about 25 seconds per domain. When crt.sh is
+down, its error is reported as received.
+
 ## 📦 Installation
 
 1. **Clone the repository:**

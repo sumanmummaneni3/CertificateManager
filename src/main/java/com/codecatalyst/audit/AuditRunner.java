@@ -1,0 +1,231 @@
+/*
+ * Copyright (c) 2026 CodeCatalyst
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.codecatalyst.audit;
+
+import com.codecatalyst.audit.AuditReport.CtDomainResult;
+import com.codecatalyst.audit.caa.CaaEvaluator;
+import com.codecatalyst.audit.caa.CaaLookupException;
+import com.codecatalyst.audit.caa.CaaResolution;
+import com.codecatalyst.audit.caa.CaaResolver;
+import com.codecatalyst.audit.ct.*;
+import com.codecatalyst.audit.served.*;
+
+import java.net.UnknownHostException;
+import java.security.cert.X509Certificate;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
+
+/**
+ * Runs every Phase 0 check for a set of targets and assembles one {@link AuditReport} (D1, amended
+ * by D8). Each check fails on its own: an error is recorded in coverage with its message as
+ * received and never stops another check or another target.
+ */
+public class AuditRunner {
+
+    private final ServedStateProber prober;
+    private final CaaResolver caa;
+    private final CtLogSource ct;
+    private final TrustAnchors anchors;
+    private final Clock clock;
+    private final int concurrency;
+    private final boolean ctFetchDer;
+
+    public AuditRunner(ServedStateProber prober, CaaResolver caa, CtLogSource ct, TrustAnchors anchors,
+                       Clock clock, int concurrency, boolean ctFetchDer) {
+        this.prober = prober;
+        this.caa = caa;
+        this.ct = ct;
+        this.anchors = anchors;
+        this.clock = clock;
+        this.concurrency = concurrency;
+        this.ctFetchDer = ctFetchDer;
+    }
+
+    public AuditReport run(List<AuditTarget> targets, List<CsvTargetReader.RowError> rowErrors,
+                           BaselineLoader.Baseline baseline, AuditReport.RunMeta metaTemplate)
+            throws InterruptedException {
+        Instant started = clock.instant();
+        List<Finding> findings = new ArrayList<>();
+        List<CheckStatus> coverage = new ArrayList<>();
+        Map<String, CertSummary> certs = new TreeMap<>();
+        Map<AuditTarget, List<AddressObservation>> byTarget = probeAll(targets, coverage);
+
+        List<AddressObservation> allObs = new ArrayList<>();
+        for (AuditTarget t : targets) {
+            List<AddressObservation> obs = byTarget.getOrDefault(t, List.of());
+            allObs.addAll(obs);
+            for (AddressObservation o : obs) {
+                if (!o.reachable()) continue;
+                for (X509Certificate c : o.chain()) certs.putIfAbsent(CertFingerprints.sha256(c), CertSummary.of(c));
+                findings.addAll(ChainAnalyzer.detectChainDefects(t.ctDomain(), o, anchors, started));
+            }
+            ChainAnalyzer.detectNodeDivergence(t.ctDomain(), obs).ifPresent(findings::add);
+            chainChange(t, obs, baseline, certs, findings, coverage);
+        }
+
+        List<CaaResolution> caaResults = new ArrayList<>();
+        Map<String, AuditTarget> caaHosts = new LinkedHashMap<>();
+        for (AuditTarget t : targets) caaHosts.putIfAbsent(t.host(), t);
+        for (AuditTarget t : caaHosts.values()) {
+            try {
+                CaaResolution r = caa.resolve(t.host());
+                caaResults.add(r);
+                findings.addAll(CaaEvaluator.evaluate(t.ctDomain(), r));
+                coverage.add(CheckStatus.ok(t.host(), "caa"));
+            } catch (CaaLookupException e) {
+                coverage.add(CheckStatus.error(t.host(), "caa", e.getMessage()));
+            }
+        }
+
+        List<CtDomainResult> ctResults = ctAll(targets, byTarget, allObs, started, findings, coverage);
+
+        AuditReport.RunMeta m = metaTemplate;
+        AuditReport.RunMeta meta = new AuditReport.RunMeta(m.tool(), m.version(), started, clock.instant(),
+                m.requester(), m.basis(), m.csv(), m.baseline(), m.resolver(), anchors.source() + ", "
+                + anchors.size() + " anchors", m.ctCacheTtlHours(), m.ctFetchDer());
+        findings.sort(Comparator.comparing(Finding::severity).thenComparing(Finding::ctDomain)
+                .thenComparing(Finding::host).thenComparing(Finding::type));
+        return new AuditReport(meta, targets, rowErrors, allObs, certs, ctResults, caaResults, findings, coverage);
+    }
+
+    private Map<AuditTarget, List<AddressObservation>> probeAll(List<AuditTarget> targets, List<CheckStatus> coverage)
+            throws InterruptedException {
+        ExecutorService pool = Executors.newFixedThreadPool(Math.max(1, concurrency));
+        try {
+            Map<AuditTarget, Future<List<AddressObservation>>> futures = new LinkedHashMap<>();
+            for (AuditTarget t : targets) futures.put(t, pool.submit(() -> prober.probe(t.host(), t.port())));
+            Map<AuditTarget, List<AddressObservation>> out = new LinkedHashMap<>();
+            for (var e : futures.entrySet()) {
+                AuditTarget t = e.getKey();
+                try {
+                    List<AddressObservation> obs = e.getValue().get();
+                    out.put(t, obs);
+                    coverage.add(verStatus(t, obs));
+                } catch (ExecutionException ex) {
+                    Throwable c = ex.getCause();
+                    String msg = (c instanceof UnknownHostException)
+                            ? "DNS resolution failed: " + c.getMessage()
+                            : c.getClass().getSimpleName() + ": " + c.getMessage();
+                    coverage.add(CheckStatus.error(t.hostPort(), "ver", msg));
+                }
+            }
+            return out;
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private static CheckStatus verStatus(AuditTarget t, List<AddressObservation> obs) {
+        long down = obs.stream().filter(o -> !o.reachable()).count();
+        if (obs.isEmpty()) return CheckStatus.error(t.hostPort(), "ver", "the name resolved to no addresses");
+        StringBuilder errs = new StringBuilder();
+        obs.stream().filter(o -> !o.reachable())
+                .forEach(o -> errs.append(errs.isEmpty() ? "" : "; ").append(o.address()).append(": ").append(o.error()));
+        if (down == obs.size()) return CheckStatus.error(t.hostPort(), "ver", "every address unreachable — " + errs);
+        if (down > 0) {
+            return new CheckStatus(t.hostPort(), "ver", CheckStatus.Status.OK,
+                    down + " of " + obs.size() + " addresses unreachable — " + errs);
+        }
+        return CheckStatus.ok(t.hostPort(), "ver");
+    }
+
+    private static void chainChange(AuditTarget t, List<AddressObservation> obs, BaselineLoader.Baseline baseline,
+                                    Map<String, CertSummary> certs, List<Finding> findings, List<CheckStatus> coverage) {
+        if (baseline == null) {
+            coverage.add(CheckStatus.notChecked(t.hostPort(), "chn02", "no --baseline given"));
+            return;
+        }
+        List<BaselineObservation> sameHostPort = baseline.observations().stream()
+                .filter(b -> b.host().equals(t.host()) && b.port() == t.port()).toList();
+        if (sameHostPort.isEmpty()) {
+            coverage.add(CheckStatus.notChecked(t.hostPort(), "chn02", "not in baseline " + baseline.source()));
+            return;
+        }
+        Map<String, String> subjects = new HashMap<>(baseline.subjectBySha());
+        certs.values().forEach(c -> subjects.put(c.sha256(), c.subject()));
+        boolean compared = false;
+        for (AddressObservation o : obs) {
+            if (!o.reachable()) continue;
+            List<BaselineObservation> sameLeaf = sameHostPort.stream()
+                    .filter(b -> b.leafSha256().equals(o.leafSha256())).toList();
+            if (sameLeaf.isEmpty()) continue;
+            compared = true;
+            ChainAnalyzer.detectChainChanged(t.ctDomain(), o, sameLeaf, subjects).ifPresent(findings::add);
+        }
+        coverage.add(compared
+                ? CheckStatus.ok(t.hostPort(), "chn02")
+                : CheckStatus.notChecked(t.hostPort(), "chn02",
+                "no reachable address serves a leaf seen in the baseline (renewed, or unreachable now)"));
+    }
+
+    private List<CtDomainResult> ctAll(List<AuditTarget> targets, Map<AuditTarget, List<AddressObservation>> byTarget,
+                                       List<AddressObservation> allObs, Instant now, List<Finding> findings,
+                                       List<CheckStatus> coverage) throws InterruptedException {
+        Map<String, List<AuditTarget>> byDomain = new LinkedHashMap<>();
+        for (AuditTarget t : targets) byDomain.computeIfAbsent(t.ctDomain(), k -> new ArrayList<>()).add(t);
+
+        // Any leaf served anywhere in the run counts as observed: a multi-SAN certificate for this
+        // domain may be served on a host listed under another one.
+        List<CtReconciler.ServedLeaf> served = new ArrayList<>();
+        for (AddressObservation o : allObs) {
+            if (o.reachable()) served.add(new CtReconciler.ServedLeaf(o.chain()[0], o.leafSha256(), o.evidence()));
+        }
+
+        List<CtDomainResult> out = new ArrayList<>();
+        for (var e : byDomain.entrySet()) {
+            String domain = e.getKey();
+            List<AuditTarget> ts = e.getValue();
+            String scope = ts.stream().anyMatch(t -> t.domain() != null) ? "DOMAIN" : "HOST_ONLY";
+            List<String> hosts = ts.stream().map(AuditTarget::hostPort).toList();
+            CtFetchResult fetched;
+            try {
+                fetched = ct.fetch(domain);
+            } catch (CtLookupException ex) {
+                coverage.add(CheckStatus.error(domain, "ct", ex.getMessage()));
+                coverage.add(CheckStatus.notChecked(domain, "ct03", "CT lookup failed, so unobserved issuance was not checked"));
+                continue;
+            }
+            coverage.add(new CheckStatus(domain, "ct", CheckStatus.Status.OK,
+                    (fetched.fromCache() ? "cached answer fetched " : "fetched ") + fetched.fetchedAt()
+                            + ("HOST_ONLY".equals(scope) ? "; scope HOST_ONLY (no domain column)" : "")));
+            List<CtIssuance> issuances = CtReconciler.reconcile(fetched.entries());
+
+            boolean anyReachable = ts.stream()
+                    .flatMap(t -> byTarget.getOrDefault(t, List.of()).stream())
+                    .anyMatch(AddressObservation::reachable);
+            if (!anyReachable) {
+                coverage.add(CheckStatus.notChecked(domain, "ct03",
+                        "no audited endpoint under this domain was reachable, so served state cannot be compared"));
+                out.add(new CtDomainResult(domain, scope, hosts, issuances, fetched.fetchedAt(), fetched.fromCache(),
+                        fetched.urls(), (int) issuances.stream().filter(i -> i.validAt(now)).count(), 0));
+                continue;
+            }
+            CtReconciler.Outcome oc = CtReconciler.detectUnobserved(domain, issuances, served, now,
+                    fetched.fetchedAt(), ctFetchDer ? ct::fetchDer : null);
+            findings.addAll(oc.findings());
+            coverage.add(CheckStatus.ok(domain, "ct03"));
+            if (!oc.derErrors().isEmpty()) {
+                coverage.add(CheckStatus.error(domain, "ct-der", String.join(" | ", oc.derErrors())));
+            }
+            out.add(new CtDomainResult(domain, scope, hosts, issuances, fetched.fetchedAt(), fetched.fromCache(),
+                    fetched.urls(), oc.currentlyValid(), oc.matched()));
+        }
+        return out;
+    }
+}

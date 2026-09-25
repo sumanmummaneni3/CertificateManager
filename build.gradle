@@ -14,6 +14,11 @@ dependencies {
     // Logging
     implementation 'org.apache.logging.log4j:log4j-api:2.25.3'
     runtimeOnly 'org.apache.logging.log4j:log4j-core:2.25.3'
+    // dnsjava logs through slf4j; route it to log4j instead of slf4j's "no providers" warning (D8 F12)
+    runtimeOnly 'org.apache.logging.log4j:log4j-slf4j2-impl:2.25.3'
+
+    // DNS CAA (type 257) queries for the audit kit (D4/D8). BSD-3-Clause.
+    implementation 'dnsjava:dnsjava:3.6.5'
 
     // JSON Support
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.0'
@@ -25,6 +30,8 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
+    // Builds throwaway X.509 chains for audit-kit unit tests
+    testImplementation 'org.bouncycastle:bcpkix-jdk18on:1.86'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 

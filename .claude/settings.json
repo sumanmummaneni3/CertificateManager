@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // .tool_response.filePath // empty'); goal=''; case \"$f\" in */src/main/*.java) goal=compileJava ;; */src/test/*.java) goal=compileTestJava ;; esac; if [ -n \"$goal\" ]; then cd /home/msuman/git/CertificateManager || exit 0; out=$(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew -q \"$goal\" 2>&1); rc=$?; if [ \"$rc\" != 0 ]; then clean=$(printf '%s' \"$out\" | sed -r 's/\\x1b\\[[0-9;]*m//g'); esc=$(printf '%s' \"$clean\" | tail -c 3000 | jq -Rs .); printf '{\"decision\":\"block\",\"reason\":%s}' \"$esc\"; fi; fi",
+            "timeout": 120,
+            "statusMessage": "Compiling touched CertificateManager class..."
+          }
+        ]
+      }
+    ]
+  }
+}

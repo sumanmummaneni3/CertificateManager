@@ -333,14 +333,24 @@ has both. Outputs per run:
 ### Acceptance gate (field checks only)
 
 Unit tests cannot close these. They are open until someone runs them:
-1. A live `-audit` against at least three real domains produces all four outputs. **Open:** one
-   domain run so far (example.com, two hosts, 2026-09-25); all four outputs written.
+1. A live `-audit` against at least three real domains produces all four outputs. ~~**Open:** one
+   domain run so far (example.com, two hosts, 2026-09-25); all four outputs written.~~ **Met
+   2026-09-25, 15:39 UTC** (run `audit-20260925-153922`, example.com/.net/.org, basis
+   PUBLIC_PROSPECT; these are IANA's documentation domains). The run produced 12 per-address
+   observations and all four outputs, and CT-03 ran from Cert Spotter for each domain while crt.sh
+   answered 502. Spot-checked by hand with openssl: each domain's served serial is in CT, matched,
+   and not flagged, and 4 other valid issuances per domain were flagged. A separate OWN run on
+   `monitor360.co.uk` found three real issues, each confirmed independently: a TLS alert 80 on
+   `www`, a valid Let's Encrypt wildcard certificate (YR2, 2026-08-10) that no audited host
+   serves, and no CAA record up to `uk` per 8.8.8.8 and 1.1.1.1.
 2. A crt.sh outage during a run shows its status and body in the coverage CSV and report. **Met
    2026-09-25:** crt.sh answered 502 on both live runs, and the coverage CSV and report carry
    `crt.sh HTTP 502 … (attempt 2 of 2): <html>…502 Bad Gateway…` verbatim, with CT-03 `NOT_CHECKED`.
 3. A CT pull for a domain matches a manual crt.sh query by hand. **Open:** crt.sh was down for
    every attempt on 2026-09-25, so the CT parsing and the `%.domain` subdomain query have never run
-   against a real crt.sh answer.
+   against a real crt.sh answer. *(Still open at 15:40 UTC: crt.sh
+   was still answering 502. D14's Cert Spotter path has been checked by hand instead, as described
+   under item 1, but that verifies Cert Spotter, not crt.sh.)*
 4. A host behind round-robin DNS produces one observation per A/AAAA record. **Met 2026-09-25:**
    example.com resolved to two IPv4 addresses and one IPv6 address, giving three observations with
    TLS 1.3 and a 4-certificate chain each.

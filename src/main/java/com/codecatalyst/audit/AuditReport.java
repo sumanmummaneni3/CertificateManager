@@ -31,16 +31,23 @@ public record AuditReport(RunMeta meta, List<AuditTarget> targets, List<CsvTarge
                           List<CtDomainResult> ct, List<CaaResolution> caa, List<Finding> findings,
                           List<CheckStatus> coverage) {
 
+    /**
+     * @param ctSources       the CT sources queried (D14)
+     * @param certSpotterAuth {@code API_KEY} or {@code ANONYMOUS}; the key itself is never recorded
+     */
     public record RunMeta(String tool, String version, Instant startedAt, Instant finishedAt, String requester,
                           String basis, String csv, String baseline, String resolver, String trustAnchors,
-                          int ctCacheTtlHours, boolean ctFetchDer) {}
+                          int ctCacheTtlHours, boolean ctFetchDer, List<String> ctSources, String certSpotterAuth) {}
+
+    /** One CT source's answer for one domain. */
+    public record SourceAnswer(String source, Instant fetchedAt, boolean fromCache, List<String> urls, int entries) {}
 
     /**
      * @param scope          {@code DOMAIN} or {@code HOST_ONLY} (no domain column given, D8)
+     * @param sources        the CT sources that answered for this domain (D14)
      * @param currentlyValid issuances valid at run time, the only ones CT-03 judges
      * @param matched        of those, how many an audited endpoint serves
      */
     public record CtDomainResult(String ctDomain, String scope, List<String> hosts, List<CtIssuance> issuances,
-                                 Instant fetchedAt, boolean fromCache, List<String> urls, int currentlyValid,
-                                 int matched) {}
+                                 List<SourceAnswer> sources, int currentlyValid, int matched) {}
 }

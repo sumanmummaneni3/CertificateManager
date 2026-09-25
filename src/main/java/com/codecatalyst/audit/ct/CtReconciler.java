@@ -27,7 +27,7 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * CT-02 reconciliation and CT-03 unobserved-issuance detection, as amended by D8.
+ * CT-02 reconciliation and CT-03 unobserved-issuance detection, as amended by D8 and D14.
  */
 public final class CtReconciler {
 
@@ -47,7 +47,7 @@ public final class CtReconciler {
 
     private CtReconciler() {}
 
-    /** CT-02: one issuance per (issuer, serial), however many log entries carry it. */
+    /** CT-02: one issuance per (issuer, serial), however many log entries and sources carry it. */
     public static List<CtIssuance> reconcile(List<CtEntry> entries) {
         Map<String, List<CtEntry>> groups = new LinkedHashMap<>();
         for (CtEntry e : entries) {
@@ -58,27 +58,34 @@ public final class CtReconciler {
         for (List<CtEntry> g : groups.values()) {
             CtEntry first = g.get(0);
             LinkedHashSet<String> names = new LinkedHashSet<>();
-            List<Long> ids = new ArrayList<>();
-            Instant firstSeen = first.entryTimestamp();
+            TreeSet<String> refs = new TreeSet<>();
+            TreeSet<String> sources = new TreeSet<>();
+            TreeSet<String> finalSha = new TreeSet<>();
+            Instant firstSeen = null;
             for (CtEntry e : g) {
                 names.addAll(e.names());
-                ids.add(e.crtShId());
-                if (e.entryTimestamp().isBefore(firstSeen)) firstSeen = e.entryTimestamp();
+                refs.add(e.ref());
+                sources.add(e.source());
+                if (Boolean.FALSE.equals(e.precert()) && e.certSha256() != null) finalSha.add(e.certSha256());
+                if (e.entryTimestamp() != null && (firstSeen == null || e.entryTimestamp().isBefore(firstSeen))) {
+                    firstSeen = e.entryTimestamp();
+                }
             }
-            Collections.sort(ids);
-            out.add(new CtIssuance(first.issuerName(), first.serialHex(), first.commonName(),
-                    List.copyOf(names), first.notBefore(), first.notAfter(), firstSeen, List.copyOf(ids)));
+            out.add(new CtIssuance(first.issuerName(), first.serialHex(), first.commonName(), List.copyOf(names),
+                    first.notBefore(), first.notAfter(), firstSeen, List.copyOf(refs), List.copyOf(sources),
+                    List.copyOf(finalSha)));
         }
         out.sort(Comparator.comparing(CtIssuance::notBefore).reversed());
         return out;
     }
 
     /**
-     * CT-03: every issuance valid at {@code now} must match, on (issuer, serial), a leaf served
-     * somewhere in the run. Expired issuances are history, not findings (D8 F2): a one-shot run has
-     * no served history to compare them with.
+     * CT-03: every issuance valid at {@code now} must be served somewhere in the run. When a source
+     * gave the SHA-256 of the final certificate, that is the match (D14); a served leaf that matches
+     * on (issuer, serial) but not on SHA-256 is {@code CT_FINGERPRINT_MISMATCH}. Otherwise the match
+     * is (issuer, serial). Expired issuances are history, not findings (D8 F2).
      *
-     * @param der null unless {@code --ct-fetch-der}; then matched issuances must also match on SHA-256
+     * @param der null unless {@code --ct-fetch-der}; then crt.sh-only matches must also match on SHA-256
      */
     public static Outcome detectUnobserved(String ctDomain, List<CtIssuance> issuances, List<ServedLeaf> served,
                                            Instant now, Instant fetchedAt, DerFetcher der)
@@ -90,29 +97,49 @@ public final class CtReconciler {
         for (CtIssuance iss : issuances) {
             if (!iss.validAt(now)) continue;
             valid++;
-            ServedLeaf hit = null;
+            ServedLeaf bySerial = null;
             for (ServedLeaf s : served) {
                 if (s.cert().getSerialNumber().equals(serial(iss.serialHex()))
                         && IssuerNames.same(iss.issuerName(), s.cert().getIssuerX500Principal().getName())) {
-                    hit = s;
+                    bySerial = s;
                     break;
                 }
             }
-            if (hit == null) {
-                findings.add(Finding.of("UNOBSERVED_ISSUANCE", ctDomain, ctDomain,
-                        "serial " + iss.serialHex(),
-                        "issued by " + iss.issuerName() + " for " + String.join(", ", iss.names())
-                                + ", valid " + iss.notBefore() + " to " + iss.notAfter() + ", first logged "
-                                + iss.firstSeen() + "; no reachable audited endpoint serves it",
-                        iss.evidence(), fetchedAt));
+            if (!iss.finalCertSha256().isEmpty()) {
+                boolean byHash = served.stream().anyMatch(s -> iss.finalCertSha256().contains(s.sha256()));
+                if (byHash) {
+                    matched++;
+                } else if (bySerial != null) {
+                    matched++;
+                    findings.add(Finding.of("CT_FINGERPRINT_MISMATCH", ctDomain, ctDomain, "serial " + iss.serialHex(),
+                            "served certificate " + bySerial.sha256() + " matches the CT entry on issuer and serial but "
+                                    + "the logged certificate is " + String.join(", ", iss.finalCertSha256()),
+                            bySerial.evidence() + " vs " + iss.evidence(), fetchedAt));
+                } else {
+                    findings.add(unobserved(ctDomain, iss, fetchedAt));
+                }
+                continue;
+            }
+            if (bySerial == null) {
+                findings.add(unobserved(ctDomain, iss, fetchedAt));
                 continue;
             }
             matched++;
-            if (der != null) {
-                checkFingerprint(ctDomain, iss, hit, der, fetchedAt, findings, derErrors);
+            if (der != null && !iss.crtShIds().isEmpty()) {
+                checkFingerprint(ctDomain, iss, bySerial, der, fetchedAt, findings, derErrors);
             }
         }
         return new Outcome(findings, valid, matched, derErrors);
+    }
+
+    private static Finding unobserved(String ctDomain, CtIssuance iss, Instant fetchedAt) {
+        return Finding.of("UNOBSERVED_ISSUANCE", ctDomain, ctDomain, "serial " + iss.serialHex(),
+                "issued by " + iss.issuerName() + " for " + String.join(", ", iss.names())
+                        + ", valid " + iss.notBefore() + " to " + iss.notAfter()
+                        + (iss.firstSeen() == null ? "" : ", first logged " + iss.firstSeen())
+                        + ", reported by " + String.join(" and ", iss.sources())
+                        + "; no reachable audited endpoint serves it",
+                iss.evidence(), fetchedAt);
     }
 
     private static void checkFingerprint(String ctDomain, CtIssuance iss, ServedLeaf hit, DerFetcher der,

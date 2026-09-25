@@ -20,7 +20,11 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * @param fetchedAt when the oldest of the answers used was fetched from crt.sh
+ * One source's answer for one domain.
+ *
+ * @param source    which source answered
+ * @param fetchedAt when the oldest of the answers used was fetched
  * @param fromCache true when any answer came from the on-disk cache
  */
-public record CtFetchResult(List<CtEntry> entries, Instant fetchedAt, boolean fromCache, List<String> urls) {}
+public record CtFetchResult(String source, List<CtEntry> entries, Instant fetchedAt, boolean fromCache,
+                            List<String> urls) {}

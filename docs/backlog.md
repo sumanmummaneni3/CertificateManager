@@ -32,7 +32,7 @@ D2/D3/D4 Non-goals so they aren't silently "fixed" later without reading the rec
 |---|---|---|---|
 | D9 | MED | **CHN-03's trust anchors are whatever trust store the running JDK has, so the same chain can pass on one machine and fail on another.** Filed 2026-09-25 (D8 F13). Debian's `/etc/ssl/certs/java/cacerts` (144 anchors) no longer holds Comodo *AAA Certificate Services*, which Oracle's store still holds. The report names the store and its anchor count, so a result can be traced, but two auditors on different distros can disagree. Fix shape: bundle a dated Mozilla/CCADB root snapshot and use it instead of `cacerts`. This overlaps with CHN-04's client profiles, which need the same data. | `audit/served/TrustAnchors.java` |
 | D10 | LOW | **`-audit` always exits 0.** Filed 2026-09-25. `AuditCommand.execute` returns 2 when a check failed and 1 on an input error, but `CertManager.parseAndExecute` discards the value, since calling `System.exit` there would kill the existing `CertManagerTest` JVM. That doesn't matter for manual runs; it matters once a script or CI job runs audits. Fix shape: `main` exits with a code returned by `parseAndExecute`. | `CertManager.java`, `audit/AuditCommand.java` |
-| D11 | MED | **D8's field acceptance items 1 and 3 are open.** Filed 2026-09-25. Nothing about crt.sh answer parsing, `%.domain` subdomain coverage or `(issuer, serial)` matching against real CT data has run on a real response: crt.sh answered 502 to every request that day. Close item 3 by running `-audit` on a domain you own when crt.sh is up and comparing the issuance count with a manual `https://crt.sh/?q=%25.<domain>` search. Close item 1 with a three-domain run. Until then, CT results in a paid audit should be spot-checked by hand. | `docs/architecture.md` D8 §Acceptance gate |
+| D11 | MED | **D8's field acceptance items 1 and 3 are open.** Filed 2026-09-25. Nothing about crt.sh answer parsing, `%.domain` subdomain coverage or `(issuer, serial)` matching against real CT data has run on a real response: crt.sh answered 502 to every request that day. Close item 3 by running `-audit` on a domain you own when crt.sh is up and comparing the issuance count with a manual `https://crt.sh/?q=%25.<domain>` search. Close item 1 with a three-domain run. Until then, CT results in a paid audit should be spot-checked by hand. **Update 2026-09-25 (D14):** CT has now been exercised live through Cert Spotter. Real data was parsed, and a served leaf was matched by SHA-256 on example.com (D14 acceptance items 1 and 2). crt.sh parsing and the `%.domain` query are still unverified, because crt.sh was down all day. *(Row re-formatted 2026-09-25 at D14's design audit: the update had been appended after the Where cell, which gave the row a fifth column.)* | `docs/architecture.md` D8 §Acceptance gate |
 
 ## Bucket 3 — Found during D8's design audit (2026-09-25)
 
@@ -50,6 +50,12 @@ From `Monitor360/Monitor360-Certificate-Verification-Requirements.md` §8.
 | IBM outside-work approval before any paid engagement | **Confirmed 2026-09-25**, as stated by the user in session. No approval document is held in this repo. |
 | Three audits offered | Open |
 | At least one audit paid | Open (this is the H5 willingness-to-pay test) |
+
+## Bucket 4 — Found during D14 (2026-09-25)
+
+| # | Severity | Item | Where |
+|---|---|---|---|
+| D15 | MED | **Anonymous Cert Spotter covers about 5 domains an hour, so a 20-domain paid audit needs an API key.** Filed 2026-09-25 at D14. The anonymous limit is 10 requests (`x-ratelimit-limit: 10`), and paging ends on an empty page, so each domain costs at least 2. Past the quota, every remaining domain's `ct:certspotter` row is `ERROR` with the 429 as received. With crt.sh also down, that leaves CT-03 `NOT_CHECKED` for those domains. That is honest, but it is a thin audit. Fix shape: get a Cert Spotter API key before the first paid audit and set `CERTSPOTTER_API_KEY`, which the kit already supports. Its cost and exact quota are unverified. | `audit/ct/CertSpotterSource.java`, `audit/AuditCommand.java` |
 
 ## Sequencing
 

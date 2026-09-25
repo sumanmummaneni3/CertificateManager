@@ -496,7 +496,10 @@ public class CertManager {
                   --resolver <ip>       Recursive DNS resolver for CAA (default: 8.8.8.8)
                   --concurrency <n>     Parallel handshakes (default: 4)
                   --ct-cache-ttl <h>    Reuse crt.sh answers up to this many hours old (default 6, 0 = off)
-                  --ct-fetch-der        Also match served certificates to CT entries by SHA-256 (slow)
+                  --ct-fetch-der        Also fetch DER from crt.sh to match crt.sh-only entries by SHA-256 (slow)
+                  --ct-sources <list>   CT sources to query: crtsh, certspotter (default: both)
+                                        Set CERTSPOTTER_API_KEY in the environment to lift Cert Spotter's
+                                        anonymous limit (about 5 domains an hour)
                 """;
     }
 

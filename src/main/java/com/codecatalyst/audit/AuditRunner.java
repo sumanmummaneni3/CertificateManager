@@ -40,17 +40,24 @@ public class AuditRunner {
 
     private final ServedStateProber prober;
     private final CaaResolver caa;
-    private final CtLogSource ct;
+    private final List<CtLogSource> ctSources;
+    private final List<String> ctUnselected;
     private final TrustAnchors anchors;
     private final Clock clock;
     private final int concurrency;
     private final boolean ctFetchDer;
 
-    public AuditRunner(ServedStateProber prober, CaaResolver caa, CtLogSource ct, TrustAnchors anchors,
-                       Clock clock, int concurrency, boolean ctFetchDer) {
+    /**
+     * @param ctSources    the CT sources to query, in order (D14)
+     * @param ctUnselected names of known sources left out by {@code --ct-sources}, recorded as NOT_CHECKED
+     */
+    public AuditRunner(ServedStateProber prober, CaaResolver caa, List<CtLogSource> ctSources,
+                       List<String> ctUnselected, TrustAnchors anchors, Clock clock, int concurrency,
+                       boolean ctFetchDer) {
         this.prober = prober;
         this.caa = caa;
-        this.ct = ct;
+        this.ctSources = List.copyOf(ctSources);
+        this.ctUnselected = List.copyOf(ctUnselected);
         this.anchors = anchors;
         this.clock = clock;
         this.concurrency = concurrency;
@@ -103,7 +110,7 @@ public class AuditRunner {
         AuditReport.RunMeta m = metaTemplate;
         AuditReport.RunMeta meta = new AuditReport.RunMeta(m.tool(), m.version(), started, clock.instant(),
                 m.requester(), m.basis(), m.csv(), m.baseline(), m.resolver(), anchors.source() + ", "
-                + anchors.size() + " anchors", m.ctCacheTtlHours(), m.ctFetchDer());
+                + anchors.size() + " anchors", m.ctCacheTtlHours(), m.ctFetchDer(), m.ctSources(), m.certSpotterAuth());
         findings.sort(Comparator.comparing(Finding::severity).thenComparing(Finding::ctDomain)
                 .thenComparing(Finding::host).thenComparing(Finding::type));
         return new AuditReport(meta, targets, rowErrors, allObs, certs, ctResults, caaResults, findings, coverage);
@@ -209,24 +216,50 @@ public class AuditRunner {
         // serving an issuance; the ct03 row names them rather than implying full coverage (D13).
         List<String> unreachable = allObs.stream().filter(o -> !o.reachable()).map(AddressObservation::subject).toList();
 
+        CtReconciler.DerFetcher der = null;
+        if (ctFetchDer) {
+            for (CtLogSource src : ctSources) {
+                if (src instanceof CrtShSource crtSh) der = crtSh::fetchDer;
+            }
+        }
+
         List<CtDomainResult> out = new ArrayList<>();
         for (var e : byDomain.entrySet()) {
             String domain = e.getKey();
             List<AuditTarget> ts = e.getValue();
             String scope = ts.stream().anyMatch(t -> t.domain() != null) ? "DOMAIN" : "HOST_ONLY";
             List<String> hosts = ts.stream().map(AuditTarget::hostPort).toList();
-            CtFetchResult fetched;
-            try {
-                fetched = ct.fetch(domain);
-            } catch (CtLookupException ex) {
-                coverage.add(CheckStatus.error(domain, "ct", ex.getMessage()));
-                coverage.add(CheckStatus.notChecked(domain, "ct03", "CT lookup failed, so unobserved issuance was not checked"));
+
+            // Every selected source is asked; one failing never stops the other (D14).
+            List<CtEntry> entries = new ArrayList<>();
+            List<AuditReport.SourceAnswer> answered = new ArrayList<>();
+            List<String> failed = new ArrayList<>();
+            for (CtLogSource src : ctSources) {
+                String check = "ct:" + src.name();
+                try {
+                    CtFetchResult r = src.fetch(domain);
+                    entries.addAll(r.entries());
+                    answered.add(new AuditReport.SourceAnswer(src.name(), r.fetchedAt(), r.fromCache(), r.urls(),
+                            r.entries().size()));
+                    coverage.add(new CheckStatus(domain, check, CheckStatus.Status.OK,
+                            (r.fromCache() ? "cached answer fetched " : "fetched ") + r.fetchedAt()
+                                    + ("HOST_ONLY".equals(scope) ? "; scope HOST_ONLY (no domain column)" : "")));
+                } catch (CtLookupException ex) {
+                    failed.add(src.name());
+                    coverage.add(CheckStatus.error(domain, check, ex.getMessage()));
+                }
+            }
+            for (String name : ctUnselected) {
+                coverage.add(CheckStatus.notChecked(domain, "ct:" + name, "not selected by --ct-sources"));
+            }
+            if (answered.isEmpty()) {
+                coverage.add(CheckStatus.notChecked(domain, "ct03",
+                        "no CT source answered, so unobserved issuance was not checked"));
                 continue;
             }
-            coverage.add(new CheckStatus(domain, "ct", CheckStatus.Status.OK,
-                    (fetched.fromCache() ? "cached answer fetched " : "fetched ") + fetched.fetchedAt()
-                            + ("HOST_ONLY".equals(scope) ? "; scope HOST_ONLY (no domain column)" : "")));
-            List<CtIssuance> issuances = CtReconciler.reconcile(fetched.entries());
+            List<CtIssuance> issuances = CtReconciler.reconcile(entries);
+            Instant fetchedAt = answered.stream().map(AuditReport.SourceAnswer::fetchedAt)
+                    .min(Comparator.naturalOrder()).orElseThrow();
 
             boolean anyReachable = ts.stream()
                     .flatMap(t -> byTarget.getOrDefault(t, List.of()).stream())
@@ -234,22 +267,28 @@ public class AuditRunner {
             if (!anyReachable) {
                 coverage.add(CheckStatus.notChecked(domain, "ct03",
                         "no audited endpoint under this domain was reachable, so served state cannot be compared"));
-                out.add(new CtDomainResult(domain, scope, hosts, issuances, fetched.fetchedAt(), fetched.fromCache(),
-                        fetched.urls(), (int) issuances.stream().filter(i -> i.validAt(now)).count(), 0));
+                out.add(new CtDomainResult(domain, scope, hosts, issuances, answered,
+                        (int) issuances.stream().filter(i -> i.validAt(now)).count(), 0));
                 continue;
             }
-            CtReconciler.Outcome oc = CtReconciler.detectUnobserved(domain, issuances, served, now,
-                    fetched.fetchedAt(), ctFetchDer ? ct::fetchDer : null);
+            CtReconciler.Outcome oc = CtReconciler.detectUnobserved(domain, issuances, served, now, fetchedAt, der);
             findings.addAll(oc.findings());
-            coverage.add(unreachable.isEmpty()
+            List<String> qualifiers = new ArrayList<>();
+            if (!failed.isEmpty()) {
+                qualifiers.add("compared against " + String.join(" and ", answered.stream()
+                        .map(AuditReport.SourceAnswer::source).toList()) + " only; " + String.join(" and ", failed)
+                        + " failed (see its row)");
+            }
+            if (!unreachable.isEmpty()) {
+                qualifiers.add("compared against reachable endpoints only; not compared: " + String.join(", ", unreachable));
+            }
+            coverage.add(qualifiers.isEmpty()
                     ? CheckStatus.ok(domain, "ct03")
-                    : new CheckStatus(domain, "ct03", CheckStatus.Status.OK,
-                    "compared against reachable endpoints only; not compared: " + String.join(", ", unreachable)));
+                    : new CheckStatus(domain, "ct03", CheckStatus.Status.OK, String.join("; ", qualifiers)));
             if (!oc.derErrors().isEmpty()) {
                 coverage.add(CheckStatus.error(domain, "ct-der", String.join(" | ", oc.derErrors())));
             }
-            out.add(new CtDomainResult(domain, scope, hosts, issuances, fetched.fetchedAt(), fetched.fromCache(),
-                    fetched.urls(), oc.currentlyValid(), oc.matched()));
+            out.add(new CtDomainResult(domain, scope, hosts, issuances, answered, oc.currentlyValid(), oc.matched()));
         }
         return out;
     }

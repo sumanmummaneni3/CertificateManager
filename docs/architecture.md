@@ -4,10 +4,155 @@ design, then what it deliberately does not do. Append-only — never delete or r
 strike through and re-date if superseded. This repo's D-numbers are its own sequence, separate
 from Monitor360's (see CLAUDE.md's Scope note).
 
-Next free number: D14 (D5–D7 and D9–D13 are backlog rows; D5–D7 filed alongside D1–D4, D12–D13 by
+Next free number: D16 (D5–D7, D9–D13 and D15 are backlog rows; D5–D7 filed alongside D1–D4, D12–D13 by
 D8's design audit — the D-number sequence is shared between architecture.md and backlog.md, per
 Monitor360's own convention).
 -->
+
+## D14 — A second CT source: Cert Spotter alongside crt.sh
+
+**Status:** approved 2026-09-25. The user asked for CT that does not depend on crt.sh, chose
+option 1 (more than one source) over option 2 (our own log monitor), and said to build it now.
+**Implemented 2026-09-25: 104 tests pass. Built, and partly field-verified: acceptance items 1 and 2
+are met, item 3 is open.** ~~Not yet reviewed or audited.~~ *(2026-09-25, architect design audit of
+the working tree on top of `0a424f8`: **CERTIFIED as built** against this record. 104 unit tests
+pass. The live run's claims were checked against its own output files (`audit-20260925-145619.*`),
+not taken from the summary. Field-verified only through Cert Spotter, on one domain. crt.sh parsing
+has still never run on a real answer (backlog D11).)*
+**Supersedes** D8's "no second CT provider" non-goal and the F9 decision "crt.sh stays the only
+CT source". F9's other half stands: every source failure is reported exactly as received.
+
+### Findings
+
+- **F1.** crt.sh answered HTTP 502 all of 2026-09-25, for every URL including the bare home page,
+  over IPv4 and IPv6 and from a second network, with no proxy involved. The kit's URL is not the
+  cause; crt.sh itself was down. An audit run that day has no CT section.
+- **F2.** Our own CT search built from the logs is not feasible in a CLI. Google's log list has 43
+  usable logs from 8 operators, and one of them (Google Argon2026h2) held 3,281,080,497 entries on
+  2026-09-25. The logs have no domain index, so a domain search means downloading and indexing all
+  of that, which is exactly what crt.sh does. A forward-only log tailer is Monitor360 Phase 1 work
+  (CT-04), not this kit's.
+- **F3.** crt.sh's public Postgres (`crt.sh:5432`), which would have bypassed its web front end,
+  refused connections on 2026-09-25.
+- **F4.** SSLMate's Cert Spotter API answered while crt.sh was down, with no API key. The contract
+  was checked against its documentation and one live response
+  (`https://api.certspotter.com/v1/issuances`):
+  - Parameters: `domain`, `include_subdomains=true`, `match_wildcards=true`, repeatable `expand`
+    (`dns_names`, `issuer`, `cert_der`), and `after=<id>` for paging.
+  - Paging: repeat with the last `id` until an **empty array** comes back.
+  - Each issuance has `id`, `tbs_sha256` (same for a precertificate and its certificate),
+    `cert_sha256`, `not_before`, `not_after` and `revoked`. `cert_der` is the base64 DER of the
+    certificate, or of the precertificate when the final certificate is not logged.
+  - **No serial number field**, but the serial and issuer come out of `cert_der` exactly. Checked:
+    all 9 example.com entries parsed, each `cert_sha256` equals SHA-256 of its `cert_der`, and
+    example.com's served leaf (serial `0624D0AB…`, SHA-256 `6153a96f…`) matched issuance
+    `16164256171` on both.
+  - **Only unexpired certificates are returned.** That is exactly what CT-03 judges (D8 F2), but
+    Cert Spotter adds nothing to the expired history in the export.
+  - **Anonymous use is limited to 10 requests** (`x-ratelimit-limit: 10`; per hour according to the
+    docs). Since paging ends on an empty page, each domain costs at least 2 requests, so anonymous
+    use covers about 5 domains an hour. An API key raises the limit and is sent as
+    `Authorization: Bearer <key>`.
+  - Errors are JSON, e.g. `{"code":"bad_query","message":"…"}` with HTTP 400. A rate limit returns
+    the code `rate_limited`, possibly with `Retry-After`.
+- **F5.** `CtEntry`/`CtIssuance` hard-code crt.sh: `crtShId`, `crtShIds`, and evidence URLs built
+  as `https://crt.sh/?id=`. They must carry their source.
+
+### Design
+
+**Sources.** New `ct/CertSpotterSource implements CtLogSource`:
+- Query URL: `https://api.certspotter.com/v1/issuances?domain=<d>&include_subdomains=true`
+  `&match_wildcards=true&expand=dns_names&expand=issuer&expand=cert_der`, paged with `after=`
+  until an empty array. There is a 50-page safety cap; hitting it is an error, not a partial success.
+- Every `cert_der` is parsed with `CertificateFactory`. Serial and issuer come from the parsed
+  certificate, `precert` is true when the poison extension is present, and `certSha256` is taken
+  from `cert_sha256`. A malformed entry fails the whole source, as with crt.sh.
+- API key: environment variable `CERTSPOTTER_API_KEY` only, sent as a Bearer token. *(Added
+  2026-09-25 after the design audit: the Cert Spotter client uses `HttpClient.Redirect.NEVER`,
+  because a followed redirect to another host could carry the `Authorization` header with it. A 3xx
+  is reported as received, like any other non-200. crt.sh keeps `NORMAL`, since it sends no
+  credentials.)* **It is never
+  written anywhere**: not to the JSON, the logs, the cache key or error messages. The run meta
+  records only `certSpotterAuth: API_KEY | ANONYMOUS`.
+- Errors as received, with one retry on a 5xx or I/O failure: `Cert Spotter HTTP 429 for <url>
+  (attempt 1 of 2): {"code":"rate_limited",…}` with `Retry-After` appended when present. A 4xx is
+  not retried. After a 429, the source stops for the rest of the run and each later domain's error
+  says so and quotes the original.
+- Its own `RateGate` at 1 s; the real limit is the hourly quota above. The cache is the shared
+  `CtCache`: the URL is the key, and the key never contains the API key.
+
+**Source selection.** `--ct-sources <list>`, default `crtsh,certspotter`, is a comma-separated list
+drawn from `crtsh` and `certspotter`. Both are queried for every CT domain, and one source failing
+does not stop the other.
+
+**Entries carry their source (F5).** `CtEntry(source, entryId, issuerName, serialHex, commonName,
+names, notBefore, notAfter, entryTimestamp (nullable), certSha256 (nullable), precert (nullable))`
+replaces `crtShId`. `CtIssuance` gets `refs` (`crt.sh:<id>`, `certspotter:<id>`) and `sources`.
+Evidence renders as `https://crt.sh/?id=<id>` and
+`Cert Spotter issuance <id> (cert_sha256 <hash>)`. `firstSeen` is the earliest non-null entry
+timestamp, or null when no source provided one (Cert Spotter gives none).
+
+**Reconciliation (CT-02).** Unchanged: (issuer, serial) across entries from both sources.
+`IssuerNames.key` already makes crt.sh's `C=…, O=…, CN=…` and Java's RFC 2253 rendering agree.
+*(Caveat added 2026-09-25 at design audit: they agree except for an issuer DN containing an
+attribute Java has no keyword for, e.g. `emailAddress`. Java hex-encodes it and `key` drops it,
+while crt.sh spells it out and `key` keeps it, so the two sources' entries for that issuance do not
+reconcile into one. The effect is cosmetic: the issuance is counted twice and may be reported twice.
+Matching is unaffected, because `IssuerNames.same` compares only the attributes both sides share.
+No publicly trusted issuing CA in current use has such a DN, so this is not filed.)*
+
+**Matching (CT-03).**
+- If any entry of an issuance has a `certSha256` for a **final** certificate, the match is on
+  SHA-256 against the served leaf. That is the exact match D7 wanted, with no extra download.
+- If a served leaf matches on (issuer, serial) but its SHA-256 differs from that final entry,
+  raise `CT_FINGERPRINT_MISMATCH` (High).
+- If only precertificate hashes, or no hash at all, are available, match on (issuer, serial) as
+  before. `--ct-fetch-der` still applies to crt.sh-only issuances.
+- `detectUnobserved` takes `now` as before. Cert Spotter's issuances are unexpired by construction;
+  crt.sh's expired ones are still filtered.
+
+**Coverage.** One row per source per CT domain, named after the source: `ct:crt.sh` and
+`ct:certspotter` *(implementation note 2026-09-25: the check is named from `CtLogSource.name()`, so
+it is `ct:crt.sh`, not the `ct:crtsh` first written here; `--ct-sources` still takes `crtsh`)*. Each is `OK` with its
+fetch time or `ERROR` with the message as received. A source left out by `--ct-sources` gets
+`NOT_CHECKED` ("not selected"). `ct03`:
+- `NOT_CHECKED` when no selected source answered;
+- `OK` otherwise, and when a selected source failed its message says "compared against <sources
+  that answered> only". The failed source's own ERROR row counts as a failed check (the same
+  pattern as D8's partial-reach rule).
+
+The `CtDomainResult` export gains `sources` (which answered). The report's CT table gains a
+"Sources" column.
+
+### Non-goals
+
+- **No log tailer and no own CT index** (F2). A forward-only monitor is Monitor360 Phase 1 (CT-04).
+- **No third source** (Merklemap, Censys, Google). Two independent operators, one with a documented
+  API, are enough to test "one is down" without more integrations. The interface keeps a third
+  source to one class.
+- **No `tbs_sha256` matching.** Computing a served certificate's CT TBS hash means re-encoding its
+  TBSCertificate without the SCT-list extension. SHA-256 of the final certificate plus (issuer,
+  serial) from the DER already covers the cases.
+- **No API key on disk or in flags.** Environment variable only. A flag would put the key in shell
+  history and in `ps` output.
+
+### Acceptance gate (field checks only)
+
+1. A live `-audit` with crt.sh down and Cert Spotter up produces CT-03 results from Cert Spotter,
+   with `ct:crt.sh` `ERROR` as received. **Met 2026-09-25** (run `audit-20260925-145619`). crt.sh
+   answered 502 and its row carries the nginx body. `ct:certspotter` was `OK`, and `ct03` was `OK`
+   with "compared against certspotter only; crt.sh failed (see its row)".
+2. On a live run, example.com's served leaf matches its Cert Spotter issuance by SHA-256 and raises
+   no `UNOBSERVED_ISSUANCE` for it. **Met 2026-09-25**, same run. Cert Spotter reported 9 unexpired
+   issuances for example.com; 1 matched the served leaf (serial `0624d0ab…`) and 8 were reported
+   `UNOBSERVED_ISSUANCE`. Those are real Sectigo and Cloudflare certificates that neither audited
+   host serves, which is exactly what CT-03 is for. The same match is kept as a unit test on the
+   recorded response (`src/test/resources/ct/`).
+3. When anonymous quota is exhausted mid-run, later domains show the 429 as received and the run
+   finishes. **Open:** unit-tested against a fake 429, but not provoked live, since that would burn
+   the hourly anonymous quota.
+
+---
 
 ## D8 — Amendments to D1–D4 before implementation (gap review, 2026-09-25)
 

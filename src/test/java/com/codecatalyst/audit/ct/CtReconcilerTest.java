@@ -22,7 +22,8 @@ class CtReconcilerTest {
     private static final String CRTSH_ISSUER = "C=GB, O=Test, CN=Test Intermediate";
 
     static CtEntry entry(long id, String issuer, String serialHex, Instant nb, Instant na) {
-        return new CtEntry(id, issuer, serialHex, "www.example.com", List.of("www.example.com"), nb, na, nb.plusSeconds(id));
+        return new CtEntry("crt.sh", String.valueOf(id), issuer, serialHex, "www.example.com", List.of("www.example.com"),
+                nb, na, nb.plusSeconds(id), null, null);
     }
 
     static CtEntry valid(long id, String serialHex) {
@@ -142,5 +143,68 @@ class CtReconcilerTest {
                 CtReconciler.reconcile(List.of(valid(10, serial))), List.of(served(C.leaf())), NOW, NOW, null);
         assertEquals(1, o.matched());
         assertEquals(C.leaf().getSerialNumber(), new BigInteger(serial, 16));
+    }
+
+    static X509Certificate realServedLeaf() {
+        try (var in = CtReconcilerTest.class.getResourceAsStream("/ct/example.com-served-leaf-2026-09-25.pem")) {
+            return (X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(in);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Test
+    @DisplayName("Real data: example.com's served leaf matches its real Cert Spotter issuance by SHA-256; the other valid issuances are unobserved")
+    void realCertSpotterMatch() throws Exception {
+        List<CtEntry> entries = CertSpotterSource.parse("u", CertSpotterSourceTest.realPage());
+        List<CtIssuance> iss = CtReconciler.reconcile(entries);
+        X509Certificate leaf = realServedLeaf();
+        CtReconciler.Outcome o = CtReconciler.detectUnobserved("example.com", iss, List.of(served(leaf)), NOW, NOW, null);
+        assertEquals(3, o.currentlyValid());
+        assertEquals(1, o.matched());
+        assertEquals(List.of("UNOBSERVED_ISSUANCE", "UNOBSERVED_ISSUANCE"), o.findings().stream().map(Finding::type).toList());
+        assertTrue(o.findings().stream().noneMatch(f -> f.subject().contains("624d0ab311558780b7d5213b9631831")));
+        assertTrue(o.findings().get(0).detail().contains("reported by certspotter"));
+    }
+
+    @Test
+    @DisplayName("The same issuance from crt.sh and Cert Spotter reconciles to one, carrying both sources and refs")
+    void mergesAcrossSources() throws Exception {
+        X509Certificate leaf = realServedLeaf();
+        CtEntry cs = CertSpotterSource.parse("u", CertSpotterSourceTest.realPage()).stream()
+                .filter(e -> e.entryId().equals("16164256171")).findFirst().orElseThrow();
+        CtEntry crt = new CtEntry("crt.sh", "999", "C=US, O=SSL Corporation, CN=Cloudflare TLS Issuing ECC CA 3",
+                "0624D0AB311558780B7D5213B9631831", "example.com", List.of("example.com"), cs.notBefore(), cs.notAfter(),
+                cs.notBefore(), null, null);
+        List<CtIssuance> r = CtReconciler.reconcile(List.of(cs, crt));
+        assertEquals(1, r.size(), r.toString());
+        assertEquals(List.of("certspotter", "crt.sh"), r.get(0).sources());
+        assertEquals(List.of("certspotter:16164256171", "crt.sh:999"), r.get(0).refs());
+        assertEquals(List.of(999L), r.get(0).crtShIds());
+        assertEquals(cs.notBefore(), r.get(0).firstSeen(), "firstSeen comes from the source that has a timestamp");
+        assertTrue(leaf.getIssuerX500Principal().getName().contains("Cloudflare TLS Issuing ECC CA 3"));
+    }
+
+    @Test
+    @DisplayName("When a final certificate's SHA-256 is known, same issuer and serial but different content is CT_FINGERPRINT_MISMATCH, with no DER download")
+    void shaKnownMismatch() throws Exception {
+        String serial = C.leaf().getSerialNumber().toString(16);
+        CtEntry e = new CtEntry("certspotter", "1", CRTSH_ISSUER, serial, "www.example.com", List.of("www.example.com"),
+                NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(9)), null, "ab".repeat(32), false);
+        CtReconciler.Outcome o = CtReconciler.detectUnobserved("example.com", CtReconciler.reconcile(List.of(e)),
+                List.of(served(C.leaf())), NOW, NOW, id -> { throw new AssertionError("no DER download needed"); });
+        assertEquals(List.of("CT_FINGERPRINT_MISMATCH"), o.findings().stream().map(Finding::type).toList());
+    }
+
+    @Test
+    @DisplayName("A precertificate hash alone does not force a SHA-256 match: (issuer, serial) still matches")
+    void precertHashFallsBackToSerial() throws Exception {
+        String serial = C.leaf().getSerialNumber().toString(16);
+        CtEntry pre = new CtEntry("certspotter", "1", CRTSH_ISSUER, serial, "www.example.com", List.of("www.example.com"),
+                NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(9)), null, "cd".repeat(32), true);
+        CtReconciler.Outcome o = CtReconciler.detectUnobserved("example.com", CtReconciler.reconcile(List.of(pre)),
+                List.of(served(C.leaf())), NOW, NOW, null);
+        assertTrue(o.findings().isEmpty());
+        assertEquals(1, o.matched());
     }
 }

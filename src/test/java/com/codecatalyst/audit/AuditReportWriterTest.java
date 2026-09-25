@@ -29,7 +29,7 @@ class AuditReportWriterTest {
                 "=HYPERLINK(\"http://evil\") issue \"ca, inc\" has no validationmethods", "caa www.example.com", NOW);
         return new AuditReport(
                 new AuditReport.RunMeta("CertificateManager", "test", NOW, NOW, "Suman", "OWN", "t.csv", null, "8.8.8.8",
-                        "test anchors", 6, false),
+                        "test anchors", 6, false, List.of("crt.sh", "certspotter"), "ANONYMOUS"),
                 List.of(new AuditTarget("www.example.com", 443, "example.com", "", Map.of(), 2)),
                 List.of(new CsvTargetReader.RowError(3, "bad|row", "port out of range")),
                 List.of(o),
@@ -37,7 +37,7 @@ class AuditReportWriterTest {
                 List.of(), List.of(), List.of(f),
                 List.of(new CheckStatus("www.example.com:443", "ver", CheckStatus.Status.OK, "1 of 2 addresses reached; each unreachable address has its own ERROR row"),
                         CheckStatus.error("www.example.com:443@192.0.2.9", "ver", "SocketTimeoutException: Read timed out"),
-                        CheckStatus.error("example.com", "ct", "crt.sh HTTP 502 for https://crt.sh/?q=example.com&output=json (attempt 2 of 2): <title>502 Bad Gateway</title>")));
+                        CheckStatus.error("example.com", "ct:crt.sh", "crt.sh HTTP 502 for https://crt.sh/?q=example.com&output=json (attempt 2 of 2): <title>502 Bad Gateway</title>")));
     }
 
     @Test

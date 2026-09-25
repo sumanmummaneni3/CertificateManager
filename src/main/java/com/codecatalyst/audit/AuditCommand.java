@@ -18,7 +18,9 @@ package com.codecatalyst.audit;
 
 import com.codecatalyst.audit.caa.CaaResolver;
 import com.codecatalyst.audit.caa.DnsjavaCaaQuerier;
+import com.codecatalyst.audit.ct.CertSpotterSource;
 import com.codecatalyst.audit.ct.CrtShSource;
+import com.codecatalyst.audit.ct.CtLogSource;
 import com.codecatalyst.audit.ct.CtCache;
 import com.codecatalyst.audit.ct.HttpFetcher;
 import com.codecatalyst.audit.ct.RateGate;
@@ -43,6 +45,10 @@ public final class AuditCommand {
     public static final String USER_AGENT =
             "CertificateManager-Audit/" + VERSION + " (+https://github.com/sumanmummaneni3/CertificateManager)";
     private static final long CRT_SH_INTERVAL_MS = 12_500;
+    // Cert Spotter's real limit is an hourly quota (10 anonymous); this only stops bursts (D14)
+    private static final long CERT_SPOTTER_INTERVAL_MS = 1_000;
+    /** The only way to give the kit a Cert Spotter API key: never a flag (shell history, ps) and never a file. */
+    public static final String CERT_SPOTTER_KEY_ENV = "CERTSPOTTER_API_KEY";
 
     private AuditCommand() {}
 
@@ -60,19 +66,36 @@ public final class AuditCommand {
             appendRunLog(o, csv.targets().size(), clock.instant());
             System.out.println("Auditing " + csv.targets().size() + " host:port rows (requester " + o.requester()
                     + ", basis " + o.basis() + "). crt.sh is rate-limited to one request every "
-                    + CRT_SH_INTERVAL_MS / 1000.0 + "s, so CT takes about 25s per domain.");
+                    + CRT_SH_INTERVAL_MS / 1000.0 + "s, so CT takes about 25s per domain."
+                    + (o.ctSources().contains("certspotter") && System.getenv(CERT_SPOTTER_KEY_ENV) == null
+                    ? " Cert Spotter without " + CERT_SPOTTER_KEY_ENV + " allows about 5 domains an hour." : ""));
 
             CtCache cache = new CtCache(getAppHome().resolve("ct-cache"), Duration.ofHours(o.ctCacheTtlHours()), clock);
-            CrtShSource ct = new CrtShSource(HttpFetcher.live(USER_AGENT), new RateGate(CRT_SH_INTERVAL_MS), cache, clock);
+            HttpFetcher http = HttpFetcher.live(USER_AGENT);
+            // Never follows redirects: it may carry the API key, which must not reach another host
+            HttpFetcher certSpotterHttp = HttpFetcher.live(USER_AGENT, java.net.http.HttpClient.Redirect.NEVER);
+            CertSpotterSource certSpotter = new CertSpotterSource(certSpotterHttp, new RateGate(CERT_SPOTTER_INTERVAL_MS), cache,
+                    clock, System.getenv(CERT_SPOTTER_KEY_ENV));
+            java.util.List<CtLogSource> sources = new java.util.ArrayList<>();
+            java.util.List<String> unselected = new java.util.ArrayList<>();
+            if (o.ctSources().contains("crtsh")) {
+                sources.add(new CrtShSource(http, new RateGate(CRT_SH_INTERVAL_MS), cache, clock));
+            } else {
+                unselected.add(CrtShSource.NAME);
+            }
+            if (o.ctSources().contains("certspotter")) sources.add(certSpotter);
+            else unselected.add(CertSpotterSource.NAME);
             CaaResolver caa = new CaaResolver(new DnsjavaCaaQuerier(o.resolver()), o.resolver(), clock);
             AuditReport report;
             try (ServedStateProber prober = ServedStateProber.live(o.concurrency())) {
-                AuditRunner runner = new AuditRunner(prober, caa, ct, TrustAnchors.jdkDefault(), clock,
+                AuditRunner runner = new AuditRunner(prober, caa, sources, unselected, TrustAnchors.jdkDefault(), clock,
                         o.concurrency(), o.ctFetchDer());
                 AuditReport.RunMeta meta = new AuditReport.RunMeta("CertificateManager", VERSION, null, null,
                         o.requester(), o.basis().name(), o.csv().toString(),
                         o.baseline() == null ? null : o.baseline().toString(), o.resolver(), null,
-                        o.ctCacheTtlHours(), o.ctFetchDer());
+                        o.ctCacheTtlHours(), o.ctFetchDer(),
+                        sources.stream().map(CtLogSource::name).toList(),
+                        certSpotter.authenticated() ? "API_KEY" : "ANONYMOUS");
                 report = runner.run(csv.targets(), csv.errors(), baseline, meta);
             }
             AuditReportWriter.Written w = AuditReportWriter.write(report, o.outDir());

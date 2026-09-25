@@ -128,10 +128,11 @@ public final class AuditReportWriter {
     }
 
     private static String coverageGaps(AuditReport r) {
-        // Every non-OK row, plus OK rows that carry a qualification (partial reach, unreachable endpoints
-        // not compared); a ct row's OK message is only its fetch time, so it is left out.
+        // Every non-OK row, plus OK rows that carry a qualification (partial reach, a CT source that
+        // failed, unreachable endpoints not compared); a ct:<source> row's OK message is only its fetch
+        // time, so it is left out.
         List<CheckStatus> gaps = r.coverage().stream()
-                .filter(c -> c.status() != CheckStatus.Status.OK || (!c.message().isEmpty() && !c.check().equals("ct")))
+                .filter(c -> c.status() != CheckStatus.Status.OK || (!c.message().isEmpty() && !c.check().startsWith("ct:")))
                 .toList();
         if (gaps.isEmpty()) return "Every check ran for every subject.\n";
         StringBuilder sb = new StringBuilder("| Subject | Check | Status | Message |\n|---|---|---|---|\n");
@@ -146,13 +147,17 @@ public final class AuditReportWriter {
         StringBuilder sb = new StringBuilder();
         if (r.ct().isEmpty()) sb.append("No CT results: see section 1's list of checks that did not run.\n\n");
         else {
-            sb.append("| CT domain | Scope | Issuances logged | Valid now | Served by an audited endpoint | Answer from |\n|---|---|---|---|---|---|\n");
+            sb.append("| CT domain | Scope | Issuances logged | Valid now | Served by an audited endpoint | Sources that answered |\n|---|---|---|---|---|---|\n");
             for (CtDomainResult d : r.ct()) {
+                String sources = d.sources().stream()
+                        .map(a -> a.source() + " (" + (a.fromCache() ? "cache, " : "live, ") + a.fetchedAt() + ")")
+                        .collect(Collectors.joining("; "));
                 sb.append("| ").append(md(d.ctDomain())).append(" | ").append(d.scope()).append(" | ")
                         .append(d.issuances().size()).append(" | ").append(d.currentlyValid()).append(" | ")
-                        .append(d.matched()).append(" | ").append(d.fromCache() ? "cache, " : "live, ")
-                        .append(d.fetchedAt()).append(" |\n");
+                        .append(d.matched()).append(" | ").append(md(sources)).append(" |\n");
             }
+            sb.append("\nCert Spotter returns only unexpired certificates, so the logged count includes expired ones only "
+                    + "from crt.sh. Findings judge only certificates valid now.\n");
             sb.append('\n');
         }
         sb.append(findingTable(r, Set.of("UNOBSERVED_ISSUANCE", "CT_FINGERPRINT_MISMATCH")));

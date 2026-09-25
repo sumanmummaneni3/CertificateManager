@@ -16,12 +16,15 @@
 
 package com.codecatalyst.audit.ct;
 
-/** A CT search provider (CT-01). crt.sh is the only one (D8); this seam is what makes a swap cheap. */
+/**
+ * A CT search provider (CT-01). There are two, crt.sh and Cert Spotter (D14), queried side by side
+ * so that one being down does not leave an audit without CT.
+ */
 public interface CtLogSource {
 
-    /** Every logged entry for {@code domain} and its subdomains. */
-    CtFetchResult fetch(String domain) throws CtLookupException, InterruptedException;
+    /** Short stable name used in coverage rows and entry refs, e.g. {@code crt.sh}. */
+    String name();
 
-    /** The DER of one entry, for the opt-in SHA-256 match (D8). */
-    byte[] fetchDer(long entryId) throws CtLookupException, InterruptedException;
+    /** Every logged entry this source has for {@code domain} and its subdomains. */
+    CtFetchResult fetch(String domain) throws CtLookupException, InterruptedException;
 }

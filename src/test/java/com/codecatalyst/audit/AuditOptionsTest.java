@@ -30,6 +30,7 @@ class AuditOptionsTest {
         assertEquals(6, o.ctCacheTtlHours());
         assertFalse(o.ctFetchDer());
         assertEquals(AuditOptions.Basis.CONSENT, o.basis());
+        assertEquals(java.util.List.of("crtsh", "certspotter"), o.ctSources());
     }
 
     @Test
@@ -39,5 +40,18 @@ class AuditOptionsTest {
         assertThrows(IllegalArgumentException.class, () -> AuditOptions.parse(new String[]{"-audit", "--csv", "t", "--requester", "S",
                 "--basis", "OWN", "--concurrency", "0"}, 1));
         assertThrows(IllegalArgumentException.class, () -> AuditOptions.parse(new String[]{"-audit", "--csv"}, 1));
+    }
+
+    @Test
+    @DisplayName("--ct-sources picks sources in fixed order and rejects unknown names")
+    void ctSources() {
+        AuditOptions o = AuditOptions.parse(new String[]{"-audit", "--csv", "t", "--requester", "S", "--basis", "OWN",
+                "--ct-sources", "certspotter, CRTSH"}, 1);
+        assertEquals(java.util.List.of("crtsh", "certspotter"), o.ctSources());
+        assertEquals(java.util.List.of("certspotter"), AuditOptions.parse(new String[]{"-audit", "--csv", "t", "--requester", "S",
+                "--basis", "OWN", "--ct-sources", "certspotter"}, 1).ctSources());
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> AuditOptions.parse(new String[]{"-audit",
+                "--csv", "t", "--requester", "S", "--basis", "OWN", "--ct-sources", "censys"}, 1));
+        assertTrue(e.getMessage().contains("censys"));
     }
 }

@@ -59,13 +59,16 @@ CertManager (CLI entry, arg parsing + dispatch)
        ├─ AuditCommand / AuditOptions / AuditRunner / AuditReportWriter — wiring, flags, orchestration, 4 outputs
        ├─ CsvTargetReader, FindingCatalog (severity + why + remediation per type), CheckStatus (coverage)
        ├─ served/  — ServedStateProber (VER-01), ChainAnalyzer (VER-02, CHN-02/03), TrustAnchors
-       ├─ ct/      — CrtShSource (+ CtCache, RateGate, HttpFetcher), CtReconciler (CT-02/03), IssuerNames
+       ├─ ct/      — CrtShSource + CertSpotterSource (D14) behind CtLogSource; CtCache, RateGate,
+       │             HttpFetcher; CtReconciler (CT-02/03, SHA-256 match when a source gives it), IssuerNames
        └─ caa/     — CaaResolver (RFC 8659 climb), DnsjavaCaaQuerier, CaaEvaluator (CAA-02)
 ```
 
 Every network dependency of the audit kit sits behind a functional interface (`HostResolver`,
 `Handshaker`, `HttpFetcher`, `CaaQuerier`, `CtLogSource`), so the whole kit is unit-tested with
-no network. Test certificates come from `src/test/.../audit/TestCerts.java` (BouncyCastle, test
+no network. `src/test/resources/ct/` holds one **real** recorded Cert Spotter response and
+example.com's real served leaf (both captured 2026-09-25), so parsing and SHA-256 matching are
+tested against real data, not only hand-written JSON. Test certificates come from `src/test/.../audit/TestCerts.java` (BouncyCastle, test
 scope only). Its keys are generated once per JVM, because RSA key generation is slow.
 
 No CLI argument-parsing library — `CommandParamsEnum` plus hand-rolled array scanning in
@@ -124,13 +127,17 @@ No CLI argument-parsing library — `CommandParamsEnum` plus hand-rolled array s
    has dropped. Every address then reports `MISSING_INTERMEDIATE` for a correct chain, with no error.
    The anchors are the running JDK's `cacerts`, so results can differ between machines (backlog D9).
    The report states which store was used.
-7. **A crt.sh failure is reported exactly as received, and must never read as "no issuances"
-   (D8 F9, the user's decision).** There is deliberately no fallback CT provider. After one retry,
-   the domain's `ct` coverage row is `ERROR` with the HTTP status and the body (e.g. nginx's 502 page),
-   and `ct03` is `NOT_CHECKED`. Do not catch the exception and return an empty list: the report would
-   then say "no unobserved issuance", which is exactly the clean-looking gap the coverage CSV exists
-   to prevent. Failures are never written to `CtCache`. A 200 with a non-JSON body is also an error,
-   not an empty result.
+7. **Every CT source failure is reported exactly as received, per source, and must never read as
+   "no issuances" (D8 F9, D14).** There are two sources, crt.sh and Cert Spotter, queried side by
+   side (`--ct-sources`). Each writes its own coverage row, `ct:crt.sh` or `ct:certspotter`. After a
+   failure (one retry on a 5xx, none on a 4xx or 429), that row is `ERROR` with the status and body,
+   e.g. nginx's 502 page. `ct03` is `NOT_CHECKED` only when **no** source answered; otherwise it is
+   `OK` and says which sources it compared against. Do not catch a failure and return an empty list:
+   the report would then say "no unobserved issuance". Failures are never written to `CtCache`, and a
+   200 with a non-JSON body is an error, not an empty result. Cert Spotter stops for the rest of the
+   run after its first 429 (anonymous quota: 10 requests, about 5 domains an hour, backlog D15). Its
+   API key comes **only** from the environment variable `CERTSPOTTER_API_KEY`: never a flag (shell
+   history, `ps`), never a file, never in a URL, cache key or error message.
 8. **`UNOBSERVED_ISSUANCE` only judges certificates valid at run time, against every leaf served in
    the run (D8 F2/F3).** A one-shot CLI has no served history. Comparing *all* logged issuances would
    flag every past renewal (about six a year for a Let's Encrypt name), and comparing per CSV row would

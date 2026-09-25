@@ -19,6 +19,21 @@ package com.codecatalyst.audit.ct;
 import java.time.Instant;
 import java.util.List;
 
-/** One crt.sh row: a log entry, which may be a precertificate or the final certificate. */
-public record CtEntry(long crtShId, String issuerName, String serialHex, String commonName,
-                      List<String> names, Instant notBefore, Instant notAfter, Instant entryTimestamp) {}
+/**
+ * One CT search result from one source (D14): a log entry, which may be a precertificate or the
+ * final certificate.
+ *
+ * @param source         {@code crt.sh} or {@code certspotter}
+ * @param entryId        the source's own id for the entry
+ * @param entryTimestamp when the entry was logged, or null when the source does not say (Cert Spotter)
+ * @param certSha256     SHA-256 of the logged DER, or null when the source does not give it (crt.sh)
+ * @param precert        true for a precertificate, false for a final certificate, null when unknown
+ */
+public record CtEntry(String source, String entryId, String issuerName, String serialHex, String commonName,
+                      List<String> names, Instant notBefore, Instant notAfter, Instant entryTimestamp,
+                      String certSha256, Boolean precert) {
+
+    public String ref() {
+        return source + ":" + entryId;
+    }
+}

@@ -64,8 +64,9 @@ standard TLS handshake per address on the listed port:
 - **Chains:** missing intermediates, AIA-only completion, wrong order, root included, expired or
   weak certificates. With `--baseline <previous audit json>`, a chain that changed under an unchanged
   leaf is flagged too.
-- **Certificate Transparency (crt.sh):** currently valid certificates for the domain that no audited
-  endpoint serves.
+- **Certificate Transparency (crt.sh and Cert Spotter, queried side by side):** currently valid
+  certificates for the domain that no audited endpoint serves. If one source is down, the other
+  still covers the audit, and the report says which answered.
 - **CAA:** effective policy per RFC 8659, missing `accounturi` / `validationmethods` and
   unrestricted wildcards.
 
@@ -77,8 +78,9 @@ java -jar CertificateManager.jar -audit --csv targets.csv --requester "Your Name
 writes four files: a JSON export, a findings CSV (with why-it-matters and remediation), a coverage
 CSV that lists every check that failed or did not run, and a Markdown report to finish by hand.
 **A subject only counts as clean when its checks are OK in the coverage file.** crt.sh is
-rate-limited to one request every 12.5 s, so CT takes about 25 seconds per domain. When crt.sh is
-down, its error is reported as received.
+rate-limited to one request every 12.5 s, so CT takes about 25 seconds per domain. Cert Spotter
+allows about 5 domains an hour anonymously; set `CERTSPOTTER_API_KEY` in the environment to lift
+that. A source that fails has its error reported as received.
 
 ## 📦 Installation
 

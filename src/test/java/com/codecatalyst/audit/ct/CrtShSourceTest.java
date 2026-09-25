@@ -41,7 +41,7 @@ class CrtShSourceTest {
         FakeHttp thenThrow(IOException e) { answers.add(e); return this; }
 
         @Override
-        public Response get(URI uri) throws IOException {
+        public Response get(URI uri, java.util.Map<String, String> headers) throws IOException {
             urls.add(uri.toString());
             Object a = answers.poll();
             if (a == null) throw new AssertionError("unexpected request " + uri);

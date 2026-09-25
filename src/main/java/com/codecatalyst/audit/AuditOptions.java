@@ -24,14 +24,18 @@ import java.util.Locale;
  * are required: every run records who asked for it and on what basis (RPT-02).
  */
 public record AuditOptions(Path csv, Path outDir, Path baseline, String resolver, int concurrency,
-                           String requester, Basis basis, int ctCacheTtlHours, boolean ctFetchDer) {
+                           String requester, Basis basis, int ctCacheTtlHours, boolean ctFetchDer,
+                           java.util.List<String> ctSources) {
+
+    /** CLI names of the CT sources, in query order (D14). */
+    public static final java.util.List<String> CT_SOURCES = java.util.List.of("crtsh", "certspotter");
 
     /** Why the operator may look at these domains. {@code PUBLIC_PROSPECT} is CT, DNS and one handshake only. */
     public enum Basis { OWN, CONSENT, PUBLIC_PROSPECT }
 
     public static final String USAGE = "-audit --csv <file> --requester <name> --basis <OWN|CONSENT|PUBLIC_PROSPECT>"
             + " [--out <dir>] [--baseline <previous audit json>] [--resolver <ip>] [--concurrency <n>]"
-            + " [--ct-cache-ttl <hours>] [--ct-fetch-der]";
+            + " [--ct-cache-ttl <hours>] [--ct-fetch-der] [--ct-sources crtsh,certspotter]";
 
     /** Parses the arguments after {@code -audit}. */
     public static AuditOptions parse(String[] args, int start) {
@@ -44,6 +48,7 @@ public record AuditOptions(Path csv, Path outDir, Path baseline, String resolver
         Basis basis = null;
         int ttl = 6;
         boolean der = false;
+        java.util.List<String> sources = CT_SOURCES;
 
         for (int i = start; i < args.length; i++) {
             String a = args[i];
@@ -64,13 +69,25 @@ public record AuditOptions(Path csv, Path outDir, Path baseline, String resolver
                 }
                 case "--ct-cache-ttl" -> ttl = intValue(args, ++i, a, 0, 24 * 30);
                 case "--ct-fetch-der" -> der = true;
+                case "--ct-sources" -> {
+                    String v = value(args, ++i, a);
+                    java.util.LinkedHashSet<String> picked = new java.util.LinkedHashSet<>();
+                    for (String part : v.split(",")) {
+                        String p = part.trim().toLowerCase(Locale.ROOT);
+                        if (!CT_SOURCES.contains(p)) {
+                            throw new IllegalArgumentException("--ct-sources takes crtsh and/or certspotter, not '" + part.trim() + "'");
+                        }
+                        picked.add(p);
+                    }
+                    sources = CT_SOURCES.stream().filter(picked::contains).toList();
+                }
                 default -> throw new IllegalArgumentException("Unknown -audit option: " + a);
             }
         }
         if (csv == null) throw new IllegalArgumentException("-audit requires --csv <file>");
         if (requester == null || requester.isEmpty()) throw new IllegalArgumentException("-audit requires --requester <name>");
         if (basis == null) throw new IllegalArgumentException("-audit requires --basis <OWN|CONSENT|PUBLIC_PROSPECT>");
-        return new AuditOptions(csv, out, baseline, resolver, concurrency, requester, basis, ttl, der);
+        return new AuditOptions(csv, out, baseline, resolver, concurrency, requester, basis, ttl, der, sources);
     }
 
     private static String value(String[] args, int i, String flag) {

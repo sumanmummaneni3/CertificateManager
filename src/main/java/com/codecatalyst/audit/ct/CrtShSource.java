@@ -30,12 +30,14 @@ import java.time.ZoneOffset;
 import java.util.*;
 
 /**
- * crt.sh, the only CT source (D8). Two queries per domain ({@code q=domain} and {@code q=%.domain})
- * cover the name and its subdomains. One retry on a 5xx or I/O failure, then the failure is raised
- * with the status code and body <b>as received</b> — the user's decision after crt.sh answered 502
- * during design: report it, do not mask it with a fallback provider.
+ * crt.sh, one of two CT sources (D8, D14). Two queries per domain ({@code q=domain} and
+ * {@code q=%.domain}) cover the name and its subdomains. One retry on a 5xx or I/O failure, then the
+ * failure is raised with the status code and body <b>as received</b>. crt.sh is the only source that
+ * returns expired certificates and serves DER by entry id.
  */
 public class CrtShSource implements CtLogSource {
+
+    public static final String NAME = "crt.sh";
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int ATTEMPTS = 2;
@@ -53,8 +55,13 @@ public class CrtShSource implements CtLogSource {
     }
 
     @Override
+    public String name() {
+        return NAME;
+    }
+
+    @Override
     public CtFetchResult fetch(String domain) throws CtLookupException, InterruptedException {
-        Map<Long, CtEntry> byId = new LinkedHashMap<>();
+        Map<String, CtEntry> byId = new LinkedHashMap<>();
         Instant oldest = null;
         boolean anyCached = false;
         List<String> urls = new ArrayList<>();
@@ -74,13 +81,13 @@ public class CrtShSource implements CtLogSource {
                 entries = parse(url, body); // throws before caching if it is not JSON
                 cache.put(url, body, at);
             }
-            for (CtEntry e : entries) byId.putIfAbsent(e.crtShId(), e);
+            for (CtEntry e : entries) byId.putIfAbsent(e.entryId(), e);
             oldest = (oldest == null || at.isBefore(oldest)) ? at : oldest;
         }
-        return new CtFetchResult(List.copyOf(byId.values()), oldest, anyCached, urls);
+        return new CtFetchResult(NAME, List.copyOf(byId.values()), oldest, anyCached, urls);
     }
 
-    @Override
+    /** The DER of one crt.sh entry, for the opt-in SHA-256 match on crt.sh-only issuances. */
     public byte[] fetchDer(long entryId) throws CtLookupException, InterruptedException {
         return getWithRetry("https://crt.sh/?d=" + entryId);
     }
@@ -125,14 +132,14 @@ public class CrtShSource implements CtLogSource {
                 }
                 String serial = n.path("serial_number").asText().toLowerCase(Locale.ROOT);
                 new java.math.BigInteger(serial, 16); // rejects a missing or non-hex serial here, not later
-                out.add(new CtEntry(n.path("id").asLong(),
+                out.add(new CtEntry(NAME, String.valueOf(n.path("id").asLong()),
                         n.path("issuer_name").asText(),
                         serial,
                         n.path("common_name").asText(),
                         names,
                         utc(n.path("not_before").asText()),
                         utc(n.path("not_after").asText()),
-                        utc(n.path("entry_timestamp").asText())));
+                        utc(n.path("entry_timestamp").asText()), null, null));
             } catch (RuntimeException e) {
                 throw new CtLookupException("crt.sh row could not be read for " + url + ": " + e.getMessage()
                         + " — row: " + snippet(n.toString().getBytes(StandardCharsets.UTF_8)));
